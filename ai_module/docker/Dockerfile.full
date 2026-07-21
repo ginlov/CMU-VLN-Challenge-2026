@@ -1,0 +1,123 @@
+# Team Xiao Hei — AI module image for the CMU VLN Challenge 2026.
+#
+# One container runs the whole submission pipeline (started by
+# `ros2 launch dummy_vlm dummy_vlm.launch`):
+#
+#   frontier exploration  →  perception scene graph (YOLO-World + SAM)  →  Gemini answer
+#
+# Two Python stacks live side by side, kept apart on purpose:
+#   * SYSTEM python 3.12 (numpy 1.26)  — ROS 2 Jazzy + rclpy + our
+#     `xiao_hei_vln` package (the scene_gemini responder). rclpy is ABI-bound
+#     to numpy 1.26, so this env must stay on numpy < 2.
+#   * /opt/perc-venv (numpy 2 / torch cu128) — the perception sidecar
+#     (YOLO-World v2 + SAM 2.1), served over HTTP on localhost:8001. Isolated
+#     in a venv so its numpy 2 / torch stack can't disturb rclpy.
+# The two talk over HTTP, exactly as they did as separate containers in dev.
+#
+# Build context is ai_module/ (see docker/build.sh).
+
+FROM zhangjicmu/ubuntu24_ros:ai_module
+
+USER root
+SHELL ["/bin/bash", "-c"]
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- system tooling: pip (base image ships none) + venv + curl -------------
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3-pip python3-venv curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# ===========================================================================
+# Perception sidecar — isolated venv (numpy 2 / torch cu128 / ultralytics)
+# ===========================================================================
+ENV YOLO_CONFIG_DIR=/opt/perception/.ultralytics \
+    HF_HOME=/opt/perception/.cache/huggingface \
+    TORCH_HOME=/opt/perception/.cache/torch
+
+RUN python3 -m venv /opt/perc-venv \
+ && /opt/perc-venv/bin/pip install --no-cache-dir --upgrade pip
+
+# torch first (from the CUDA 12.8 wheel index, matching the dev perception
+# image), then the rest so pip keeps the pinned torch.
+RUN /opt/perc-venv/bin/pip install --no-cache-dir \
+        torch==2.11.0 torchvision --index-url https://download.pytorch.org/whl/cu128
+# SAM2_BUILD_CUDA=0: the ROS base has no nvcc, and SAM 2.1's optional CUDA
+# post-processing kernel isn't needed for image (vs. video) prediction — skip
+# compiling it so the install doesn't require a CUDA toolchain.
+RUN SAM2_BUILD_CUDA=0 /opt/perc-venv/bin/pip install --no-cache-dir \
+        ultralytics==8.4.72 \
+        sam2==1.1.0 \
+        fastapi==0.115.6 \
+        "uvicorn[standard]==0.34.0" \
+        python-multipart==0.0.20 \
+        pycocotools==2.0.8 \
+        git+https://github.com/ultralytics/CLIP.git
+
+# perception server code
+RUN mkdir -p /opt/perception/models /ultralytics/weights/clip
+COPY perception/server.py perception/pipeline.py perception/geometry.py perception/__init__.py \
+     /opt/perception/
+# Model weights, all fetched at build time so they are baked into the image
+# (kept out of git — the 338 MB CLIP blob would need LFS otherwise):
+#   - YOLO-World v2 (open-vocab detector) + SAM 2.1 Hiera Tiny (segmenter)
+#   - OpenAI CLIP ViT-B/32 — the text encoder YOLO-World v2 loads. Placed where
+#     Ultralytics' loader looks so it never hits the network at runtime. The
+#     sha256 we verify is also the upstream URL path (content-addressed).
+RUN curl -fsSL -o /opt/perception/models/yolov8x-worldv2.pt \
+        https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8x-worldv2.pt \
+ && curl -fsSL -o /opt/perception/models/sam2.1_hiera_tiny.pt \
+        https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt \
+ && CLIP_SHA=40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af \
+ && curl -fSL --retry 3 -o /ultralytics/weights/clip/ViT-B-32.pt \
+        "https://openaipublic.azureedge.net/clip/models/${CLIP_SHA}/ViT-B-32.pt" \
+ && echo "${CLIP_SHA}  /ultralytics/weights/clip/ViT-B-32.pt" | sha256sum -c -
+
+# ===========================================================================
+# Responder — our xiao_hei_vln package into SYSTEM python (ROS 2 / numpy 1.26)
+# ===========================================================================
+# --break-system-packages: Ubuntu 24.04 marks the system Python
+# externally-managed; the accepted escape hatch inside an isolated image.
+# Editable install so a bind mount over src takes effect without reinstall.
+# Extras: gemini (google-genai) + perception (httpx/pycocotools HTTP client)
+# + exploration (matplotlib). No torch here — perception lives in the venv.
+WORKDIR /opt/xiao_hei_vln
+COPY xiao_hei_vln/pyproject.toml xiao_hei_vln/README.md ./
+COPY xiao_hei_vln/src ./src
+# --ignore-installed: the base image ships some deps (e.g. kiwisolver) as apt
+# packages with no pip RECORD, which pip can't uninstall to upgrade; ignore
+# them and install our resolved set fresh into the same site-packages.
+RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed \
+        -e ".[gemini,perception,exploration]"
+
+# ===========================================================================
+# dummy_vlm launcher package (name kept for the eval's `ros2 launch` command)
+# ===========================================================================
+COPY src/dummy_vlm /home/docker/ai_module/src/dummy_vlm
+WORKDIR /home/docker/ai_module
+RUN source /opt/ros/jazzy/setup.bash \
+ && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select dummy_vlm
+RUN echo "source /home/docker/ai_module/install/setup.bash" >> /home/docker/.bashrc
+
+# ===========================================================================
+# Runtime configuration (baked into the image; override at `docker run -e`)
+# ===========================================================================
+# Gemini API token arrives as a build ARG — never committed as a literal
+# (GitHub push protection blocks committed secrets, and the repo is public).
+# The published image oel20/cmu-vln-ai-module:latest was built with the real
+# key passed in, so evaluation (which pulls that image) has it:
+#   docker build --build-arg XIAO_HEI_GEMINI_API_KEY=<key> -f docker/Dockerfile.full .
+ARG XIAO_HEI_GEMINI_API_KEY=REPLACE_WITH_YOUR_GEMINI_KEY
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt \
+    XIAO_HEI_RESPONDER=scene_gemini \
+    XIAO_HEI_PERCEPTION_BASE_URL=http://localhost:8001 \
+    XIAO_HEI_VLM_TICK_HZ=2.0 \
+    # Frontier sweep budget — bounded so a scene stays within the 10-min
+    # per-question eval limit. Tune per scene size.
+    XIAO_HEI_EXPLORATION_MAX_WAYPOINTS=60 \
+    # From the build ARG above (real value baked into the published image).
+    XIAO_HEI_GEMINI_API_KEY=${XIAO_HEI_GEMINI_API_KEY} \
+    XIAO_HEI_GEMINI_MODEL=gemini-2.5-flash
+
+WORKDIR /home/docker/ai_module

@@ -1,0 +1,110 @@
+[project]
+name = "xiao-hei-vln"
+version = "0.1.0"
+description = "Team Xiao Hei's VLM stack for the CMU VLN Challenge 2026"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # numpy 1.26 is what the challenge docker base ships via apt; loose pin
+    # avoids fighting the system package during the docker build.
+    "numpy>=1.26",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# Lightweight HTTP client for the vLLM sidecar (default Qwen path).
+qwen = [
+    "openai>=1.30",
+    "pillow>=10",
+]
+# Heavy in-process vLLM engine. Requires CUDA GPU in the same process.
+# Use this only for single-process local development without docker-compose.
+qwen-local = [
+    "vllm>=0.7,<0.10",
+    "pillow>=10",
+    "huggingface-hub>=0.24",
+]
+# Gemini API responder — explores via the perception pipeline, then asks
+# Gemini for the final answer / route. Lazy-imported so test/CI environments
+# without the SDK installed can still import `xiao_hei_vln.gemini` for typing.
+gemini = [
+    # The SDK had a major reshape at 1.0 — `client.models.generate_content`
+    # only exists post-1.0. Pinning >=1.0 keeps us on the supported API.
+    "google-genai>=1.0",
+    "pillow>=10",
+    # The challenge docker base ships matplotlib 3.6.3 via apt (RECORD-less,
+    # so pip cannot uninstall it). scene_rep only uses the ancient Agg API
+    # (subplots/imshow/savefig/ListedColormap), so floor at the system
+    # version: this lets the apt package satisfy the dep and stops pip from
+    # trying (and failing) to upgrade kiwisolver/matplotlib during the build.
+    "matplotlib>=3.6",
+]
+# HTML report generation from VLM tick logs (scripts/generate_report.py).
+replay = [
+    "matplotlib>=3.8",
+    "pillow>=10",
+    "networkx>=3.0",
+]
+# Client side of the perception sidecar (PerceptionResponder). The
+# sidecar itself ships these deps in its own image; this extra is
+# what the ai_module image (or local dev) needs to *talk* to it.
+perception = [
+    "httpx>=0.27",
+    "pillow>=10",
+    "pycocotools>=2.0.8",
+]
+# Online exploration strategies + debug visualisation.
+exploration = [
+    "matplotlib>=3.8",
+]
+# Offline trajectory generation from traversable-area point clouds.
+trajectory = [
+    "scipy>=1.12",
+    "shapely>=2.0",
+    "matplotlib>=3.8",
+]
+# Documentation site (mkdocs serve / mkdocs gh-deploy).
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+]
+# Sample visualization (dataset_generator/visualize_sample.py).
+# Heavy (~400 MB Open3D wheel); install only when inspecting jsonl rows
+# locally — not needed for training / docker / CI.
+viz = [
+    "open3d>=0.18",
+    "pillow>=10",
+]
+
+[project.scripts]
+# `xiao-hei-vlm` is the canonical entry; pick the responder via the
+# `XIAO_HEI_RESPONDER=dummy|qwen` env var. `xiao-hei-dummy-vlm` is kept
+# as an alias so the Task-2 docker image / docs keep working.
+xiao-hei-vlm = "xiao_hei_vln.app.main:main"
+xiao-hei-dummy-vlm = "xiao_hei_vln.app.main:main"
+xiao-hei-eval = "xiao_hei_vln.evaluator.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xiao_hei_vln"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "dataset_generator"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

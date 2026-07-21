@@ -1,9 +1,33 @@
 <launch>
 
-  <node pkg="dummy_vlm" exec="dummyVLM" name="dummyVLM" output="screen">
-    <param name="waypoint_file_dir" value="$(find-pkg-share dummy_vlm)/data/waypoints.ply" />
-    <param name="object_list_file_dir" value="$(find-pkg-share dummy_vlm)/data/object_list.txt" />
-    <param name="waypointReachDis" value="1.0" />
-  </node>
+  <!--
+    Team Xiao Hei AI module. This single launch brings up the whole
+    in-container pipeline (same command the challenge template documents:
+    `ros2 launch dummy_vlm dummy_vlm.launch`):
+
+      1. Perception sidecar  — YOLO-World v2 + SAM 2.1, served over HTTP on
+         localhost:8001. Runs in its own Python venv (/opt/perc-venv) so its
+         numpy 2 / torch stack stays isolated from the ROS 2 (numpy 1.26)
+         Python the responder node uses.
+      2. scene_gemini node   — frontier exploration builds the perception
+         scene graph on the fly, then Gemini answers. It blocks on the
+         perception /healthz before it starts answering, so no explicit
+         ordering/delay is needed here.
+
+    All runtime configuration (responder choice, Gemini key, exploration
+    budget, perception URL) is baked as ENV in the image; override at
+    `docker run` with -e if needed.
+  -->
+
+  <executable
+      cmd="/opt/perc-venv/bin/python -m uvicorn perception.server:app --host 0.0.0.0 --port 8001"
+      name="perception_sidecar"
+      cwd="/opt"
+      output="screen" />
+
+  <executable
+      cmd="xiao-hei-vlm"
+      name="xiao_hei_scene_gemini"
+      output="screen" />
 
 </launch>

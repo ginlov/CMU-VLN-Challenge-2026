@@ -1,0 +1,4 @@
+# Large model weight fetched at image-build time (see docker/Dockerfile),
+# not committed — the built image on Docker Hub carries it.
+ViT-B-32.pt
+*.pt
