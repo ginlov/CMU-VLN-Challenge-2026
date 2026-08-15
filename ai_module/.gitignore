@@ -1,0 +1,10 @@
+# vlm/ is a directory of loose Python files on purpose — it is edited and run
+# in place inside the container while debugging a run — so bytecode caches
+# appear here routinely. The repository root's .gitignore does not cover them.
+__pycache__/
+*.py[cod]
+
+# colcon, if anyone builds from a bind-mounted working tree
+build/
+install/
+log/

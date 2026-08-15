@@ -5,8 +5,11 @@
     Team Xiao Hei AI module launcher. The package name and launch file
     (dummy_vlm.launch) are kept from the challenge template so the
     evaluation's `ros2 launch dummy_vlm dummy_vlm.launch` invocation still
-    works; it now brings up our scene_gemini pipeline (frontier exploration
-    + perception scene graph + Gemini answering) instead of the C++ dummy.
+    works. It now starts a router that reads the question and picks the stack
+    that answers it: instruction-following is driven in process (VLM grounding
+    + lidar lift + waypoints); numerical and object-reference hand over to
+    scene_gemini.launch (frontier exploration + perception scene graph +
+    Gemini), which is the previous pipeline kept verbatim.
   </description>
   <maintainer email="longgiang2015bn@gmail.com">Team Xiao Hei</maintainer>
   <license>BSD</license>
