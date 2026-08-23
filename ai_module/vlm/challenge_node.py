@@ -44,11 +44,12 @@ sys.path.insert(0, str(HERE / "src"))       # PYTHONPATH does this in the image;
 import numpy as np                                                # noqa: E402
 import rclpy                                                      # noqa: E402
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
-from std_msgs.msg import String                                   # noqa: E402
+from std_msgs.msg import Int32, String                            # noqa: E402
 
 from classify import NUMERICAL, REFERENCE, classify                # noqa: E402
 from robot_node import RobotNode                                   # noqa: E402
 
+from answer_numerical import answer_numerical                     # noqa: E402
 from approach_loop import COST_PER_CALL, Ctx                       # noqa: E402
 import decompose as decompose_mod                                  # noqa: E402
 from decompose import decompose                                    # noqa: E402
@@ -65,6 +66,10 @@ OUT_ROOT = Path(os.environ.get("XIAO_HEI_OUT", "/tmp/xiao_hei_run"))
 # be missed. RELIABLE anyway: it is the one message whose loss ends the run.
 QUESTION_QOS = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE,
                           history=HistoryPolicy.KEEP_LAST)
+# The answer goes back the way the question came: RELIABLE, and published more
+# than once, because there is exactly one of it and its loss is the whole mark.
+ANSWER_QOS = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE,
+                        history=HistoryPolicy.KEEP_LAST)
 
 
 def wait_for_question(node, timeout: float) -> str | None:
@@ -87,6 +92,51 @@ def wait_for_question(node, timeout: float) -> str | None:
 
 SCENE_GEMINI_LAUNCH = os.environ.get(
     "XIAO_HEI_OTHER_LAUNCH", "dummy_vlm scene_gemini.launch")
+
+
+def handle_numerical(node, bot: RobotNode, question: str) -> int:
+    """Find what the question is about, look at it, count, publish one integer.
+
+    Numerical used to hand over with object reference, and no longer does. The
+    two are not the same problem: eleven of the fifteen released counting
+    questions are *anchor-local* — one piece of furniture, and the count is of
+    small things on or above it — so answering one is finding an object and
+    framing it, which is what the drive loop below already does. Object
+    reference stays with the perception + Gemini stack; see `hand_over`.
+
+    It publishes whatever it counted. Silence was right while nothing was wired
+    in, because a wrong integer scores the same 0 and looks in the log like a
+    working responder — but scoring is exact-match 0 or 1, so once a responder
+    exists, abstaining can only lose the point it might have won.
+    """
+    out = OUT_ROOT / time.strftime("%m%d_%H%M%S")
+    out.mkdir(parents=True, exist_ok=True)
+    ctx = Ctx(robot=bot, out=out, log=(out / "steps.jsonl").open("w"),
+              backend="claude", model=MODEL,
+              prompt_version=DEFAULT_PROMPT_VER, deadline=T0 + BUDGET_S)
+    ctx.note_settings()
+    try:
+        t = answer_numerical(ctx, question)
+    finally:
+        ctx.close()
+
+    pub = node.create_publisher(Int32, "/numerical_response", ANSWER_QOS)
+    msg = Int32()
+    msg.data = int(t["count"])
+    # Repeated for the same reason the question is: a subscriber that came up
+    # late still hears it, and there is no second chance at this message.
+    for _ in range(5):
+        pub.publish(msg)
+        rclpy.spin_once(node, timeout_sec=0.2)
+    node.get_logger().info(
+        f"published {msg.data} on /numerical_response "
+        f"({t['clusters']} placed + {t['unplaced']} unplaced over "
+        f"{t['looks']} looks, per view {t['per_view']}, "
+        f"{'a view was sufficient' if t['sufficient'] else 'never sufficient'}) "
+        f"in {ctx.calls} calls (${ctx.calls * COST_PER_CALL:.2f}), "
+        f"{time.time() - T0:.0f}s of {BUDGET_S:.0f}   log: {out}/steps.jsonl")
+    (out / "answer.json").write_text(json.dumps(t, indent=1, default=str))
+    return 0
 
 
 def hand_over(node, question: str, kind: str) -> None:
@@ -279,10 +329,14 @@ def main() -> int:
         # try/except below on purpose: there is nothing left of this process to
         # recover into, and swallowing an exec failure would leave a node that
         # answers nothing while looking alive.
-        if kind in (NUMERICAL, REFERENCE):
+        #
+        # Numerical used to come through here too. It answers in-process now,
+        # so only object reference leaves.
+        if kind == REFERENCE:
             hand_over(node, question, kind)
         try:
-            rc = run_instruction(node, bot, question)
+            rc = (handle_numerical(node, bot, question) if kind == NUMERICAL
+                  else run_instruction(node, bot, question))
         except Exception:                         # noqa: BLE001 — see below
             # Scoring is per constraint with partial credit on the trajectory
             # actually driven, so the waypoints already published still count.
@@ -295,6 +349,19 @@ def main() -> int:
                 f"the run raised, {time.time() - T0:.0f}s in; the trajectory "
                 f"driven so far stands:\n{traceback.format_exc()}")
             rc = 4
+
+        # Park before idling. `drive_to` publishes a waypoint once and never
+        # retracts it, so a module that stops thinking leaves the local planner
+        # still driving at its last goal — and oscillating in place when that
+        # goal was unreachable, which is what a drive timeout means. Those
+        # metres are still being scored: instruction following is marked on the
+        # driven trajectory, and a vehicle nobody is steering can wander into a
+        # keep-out the run had respected.
+        parked = bot.stop()
+        if not parked.get("ok"):
+            node.get_logger().warning(
+                f"could not park the vehicle: {parked.get('why')} — it may keep "
+                f"driving at its last waypoint")
 
         # Stay up once the question has been answered. The container is the
         # graders' to stop, and a process that exits the moment it finishes is

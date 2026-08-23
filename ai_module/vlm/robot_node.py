@@ -284,6 +284,42 @@ class RobotNode:
         return all(v is not None for v in
                    (self._img, self._scan, self._terrain, self._snap_pose))
 
+    def stop(self) -> dict:
+        """Park where we stand, so the stack stops chasing the last waypoint.
+
+        `drive_to` publishes once and returns; nothing retracts the goal, so the
+        local planner holds it after this process has finished with the
+        question and keeps driving at it. When the goal is unreachable -- the
+        case a drive timeout reports -- the vehicle oscillates in place until
+        the stack is restarted.
+
+        That is not cosmetic here. Instruction following is scored on the
+        driven trajectory, so a vehicle still moving after the run has ended is
+        still writing to the thing being marked, and it can wander into a
+        keep-out the run had respected. Publishing the current pose is the
+        retraction: a goal the vehicle is already at, which the planner settles
+        on instead of hunting.
+
+        Never raises. It runs on the way out, and a question that answered
+        correctly must not fail because the parking brake did.
+        """
+        try:
+            if self.pose is None:
+                for _ in range(120):
+                    rclpy.spin_once(self.node, timeout_sec=0.05)
+                    if self.pose is not None:
+                        break
+            if self.pose is None:
+                return {"ok": False, "why": "no /state_estimation"}
+            self.goal = (float(self.pose[0]), float(self.pose[1]))
+            sent = self._send()
+            for _ in range(40):
+                rclpy.spin_once(self.node, timeout_sec=0.05)
+            return {"ok": bool(sent), "why": "parked" if sent else "no subscriber",
+                    "goal": list(self.goal)}
+        except Exception as e:                    # noqa: BLE001 -- see docstring
+            return {"ok": False, "why": repr(e)}
+
     def drive_to(self, x: float, y: float, timeout: float) -> dict:
         """Publish one waypoint and watch the vehicle until it settles.
 
