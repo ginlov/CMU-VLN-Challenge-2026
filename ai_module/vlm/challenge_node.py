@@ -319,8 +319,11 @@ def main() -> int:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             node.get_logger().error(
                 "ANTHROPIC_API_KEY is not set — this module answers by calling "
-                "the Claude API and can do nothing without it. Pass it with "
-                "`docker run -e ANTHROPIC_API_KEY=...`; see ai_module/README.md.")
+                "the Claude API and can do nothing without it. Rebuild with "
+                "`docker compose -f compose_gpu.yml build "
+                "--build-arg ANTHROPIC_API_KEY=...`, or start a one-off shell "
+                "with `docker exec -e ANTHROPIC_API_KEY=... -it "
+                "iros2026_ai_module bash`; see ai_module/README.md.")
             return 2
 
         question = args.question
