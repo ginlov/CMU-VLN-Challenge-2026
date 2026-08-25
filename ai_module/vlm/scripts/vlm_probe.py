@@ -708,7 +708,15 @@ def ask_claude(prompt: str, images: list[bytes], model: str,
     # though the cache keeps the earlier work. Backoff is exponential with
     # jitter, so the extra attempts cost nothing when the service is healthy.
     client = anthropic.Anthropic(
-        max_retries=int(os.environ.get("XIAO_HEI_API_MAX_RETRIES", "8")))
+        max_retries=int(os.environ.get("XIAO_HEI_API_MAX_RETRIES", "8")),
+        # `accept-encoding: identity` is not a performance choice: the SDK
+        # is pinned to a plain-httpx build in the Dockerfile, and this keeps
+        # the module working if it is ever run against an httpx2 build,
+        # whose brotli decoder is incompatible with the base image's
+        # brotli 1.1.0. Replies are a few KB of JSON, so not compressing
+        # them costs nothing. See the Dockerfile's pip block for the
+        # failure mode this avoids.
+        default_headers={"accept-encoding": "identity"})
     # v3 replies measured 460 output tokens, which 2048 covered comfortably.
     # v4 asks the model to enumerate every candidate and anchor with a note
     # each, on top of `alternates` and `evidence`; a five-lantern reply on
