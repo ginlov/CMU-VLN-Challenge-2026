@@ -78,7 +78,15 @@ def classify_claude(question: str) -> str:
     import anthropic
 
     client = anthropic.Anthropic(
-        max_retries=int(os.environ.get("XIAO_HEI_API_MAX_RETRIES", "8")))
+        max_retries=int(os.environ.get("XIAO_HEI_API_MAX_RETRIES", "8")),
+        # `accept-encoding: identity` is not a performance choice: the SDK
+        # is pinned to a plain-httpx build in the Dockerfile, and this keeps
+        # the module working if it is ever run against an httpx2 build,
+        # whose brotli decoder is incompatible with the base image's
+        # brotli 1.1.0. Replies are a few KB of JSON, so not compressing
+        # them costs nothing. See the Dockerfile's pip block for the
+        # failure mode this avoids.
+        default_headers={"accept-encoding": "identity"})
     # Generous ceiling for one word: on claude-opus-5 thinking is on unless it
     # is switched off, and it bills against this same limit. A classifier that
     # comes back empty because it spent the ceiling reasoning would look like a

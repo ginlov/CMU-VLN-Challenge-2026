@@ -37,9 +37,35 @@ USER root
 #
 # `anthropic` is the only genuinely new dependency and pulls nothing
 # numpy-shaped (httpx / pydantic / anyio / jiter).
+#
+# --- why anthropic is pinned, and pinned to exactly this ----------------------
+# Unpinned, this line resolved to a different SDK depending on the day the
+# image was built, and the two are not interchangeable:
+#
+#   anthropic <  1.0.0   depends on httpx  (plain, what is installed here)
+#   anthropic >= 1.0.0   depends on httpx2 (a fork, released 2026-08-20)
+#
+# httpx2's brotli decoder guards against decompression bombs by calling
+#
+#     self._decompress(data, output_buffer_limit=...)
+#
+# and that keyword argument only exists in Google `brotli` >= 1.2.0. The base
+# image carries apt's python3-brotli 1.1.0, whose `process()` is a C method
+# taking no keyword arguments, so every response the API compresses dies with
+#
+#     TypeError: process() takes no keyword arguments
+#
+# which httpx2 wraps as a transport error and the SDK re-wraps as
+# `APIConnectionError: Connection error.` — a message that sends you to look at
+# the network and the API key, neither of which is involved: the request goes
+# out fine and the failure is in decoding the reply. Upgrading brotli instead
+# would mean pip overwriting an apt package, i.e. exactly the numpy trap above.
+#
+# 0.122.0 is not "a version that works", it is the version every run in this
+# repo's results was produced on (verified in the images on the run hosts).
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
         "numpy<2" \
-        anthropic
+        "anthropic==0.122.0"
 
 # --- the instruction-following stack -----------------------------------------
 # Deliberately a directory of plain files rather than an installed package, so
