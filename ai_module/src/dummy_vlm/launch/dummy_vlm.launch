@@ -1,33 +1,31 @@
 <launch>
 
   <!--
-    Team Xiao Hei AI module. This single launch brings up the whole
-    in-container pipeline (same command the challenge template documents:
-    `ros2 launch dummy_vlm dummy_vlm.launch`):
+    Team Xiao Hei AI module — entry point.
 
-      1. Perception sidecar  — YOLO-World v2 + SAM 2.1, served over HTTP on
-         localhost:8001. Runs in its own Python venv (/opt/perc-venv) so its
-         numpy 2 / torch stack stays isolated from the ROS 2 (numpy 1.26)
-         Python the responder node uses.
-      2. scene_gemini node   — frontier exploration builds the perception
-         scene graph on the fly, then Gemini answers. It blocks on the
-         perception /healthz before it starts answering, so no explicit
-         ordering/delay is needed here.
+    The package name and this file's name are kept from the challenge template
+    so the evaluation's `ros2 launch dummy_vlm dummy_vlm.launch` still works.
 
-    All runtime configuration (responder choice, Gemini key, exploration
-    budget, perception URL) is baked as ENV in the image; override at
-    `docker run` with -e if needed.
+    Only one process starts here: the router. It waits for
+    /challenge_question, decides which of the three question types arrived,
+    and then either
+
+      instruction-following  -> drives the route itself (VLM grounding +
+                                lidar lift + waypoints), in this process;
+      numerical / reference  -> hands the process over to
+                                `scene_gemini.launch`, which is the previous
+                                pipeline (perception sidecar + frontier
+                                exploration + Gemini) kept verbatim.
+
+    One process at a time, by construction: the hand-off `exec`s. That matters
+    because the frontier explorer publishes waypoints from the moment it
+    starts, and two things steering /way_point_with_heading is not a race we
+    would win.
+
+    Configuration is by environment variable — ANTHROPIC_API_KEY (required),
+    XIAO_HEI_CLASSIFY, XIAO_HEI_BUDGET_S, XIAO_HEI_IMAGE_TOPIC. See
+    ai_module/README.md.
   -->
-
-  <executable
-      cmd="/opt/perc-venv/bin/python -m uvicorn perception.server:app --host 0.0.0.0 --port 8001"
-      name="perception_sidecar"
-      cwd="/opt"
-      output="screen" />
-
-  <executable
-      cmd="xiao-hei-vlm"
-      name="xiao_hei_scene_gemini"
-      output="screen" />
+  <node pkg="dummy_vlm" exec="dummyVLM" name="dummyVLM" output="screen" />
 
 </launch>
