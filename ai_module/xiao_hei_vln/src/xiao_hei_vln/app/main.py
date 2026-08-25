@@ -12,16 +12,9 @@ Pick the responder with `XIAO_HEI_RESPONDER`:
                         Detects + segments objects per tick, projects
                         masks through the LiDAR scan to lift to 3D,
                         and answers from the live scene graph.
-  - `scene_gemini`    — the submission pipeline. The shared frontier
-                        explorer sweeps the scene while the perception
-                        sidecar builds the object scene graph
-                        (`ingest()`); once exploration completes, the
-                        populated graph + panorama + occupancy map are
-                        handed to Gemini for the final answer (Task 1) or
-                        route plan (Task 2). Requires
-                        `XIAO_HEI_GEMINI_API_KEY` and the perception
-                        sidecar. Build with
-                        `XIAO_HEI_EXTRA=perception,gemini,exploration`.
+  - `scene_gemini`    — REMOVED. Raises with an explanation; the team runs
+                        on a single model API and the google-genai SDK is no
+                        longer installed in the image.
   - `scene_claude`    — the object-reference (Task-2) pipeline. Same
                         perception sidecar builds the scene graph, but the
                         `nav_task1` explorer drives *toward the object the
@@ -179,107 +172,25 @@ def _build_responder(
         )
         return responder, logger
     if name == "scene_gemini":
-        from dataclasses import asdict
-
-        from xiao_hei_vln.gemini import GeminiConfig, GeminiEngine
-        from xiao_hei_vln.logger import VLMLogger
-        from xiao_hei_vln.perception import PerceptionResponder
-        from xiao_hei_vln.perception.client import (
-            DEFAULT_BASE_URL,
-            HTTPPerceptionClient,
+        # Removed. The team runs on one model API: the google-genai SDK is no
+        # longer installed in the image, no Gemini key is baked into it, and
+        # `scene_gemini.launch` is gone. The responder source is still in the
+        # tree for reference, but nothing can configure its way back to a
+        # Gemini call, so failing here with the reason beats failing later with
+        # a missing-key error that reads like a misconfiguration.
+        raise ValueError(
+            "XIAO_HEI_RESPONDER=scene_gemini is no longer supported — the "
+            "Gemini pipeline was removed when the team moved to a single model "
+            "API. Use scene_claude (object reference) or perception.",
         )
-        from xiao_hei_vln.perception.lifter import DEFAULT_MIN_INLIERS, PointLifter
-        from xiao_hei_vln.perception.responder import (
-            DEFAULT_NEAR_THRESHOLD as PERCEPTION_NEAR_THRESHOLD,
-        )
-        from xiao_hei_vln.perception.responder import (
-            DEFAULT_SCORE_THRESHOLD,
-        )
-        from xiao_hei_vln.perception.scan_accumulator import ScanAccumulator
-        from xiao_hei_vln.perception.vocab import Vocabulary
-        from xiao_hei_vln.scene_gemini import SceneGeminiResponder
-
-        # --- Perception sidecar → scene-graph building (used via ingest()) ---
-        base_url = os.environ.get("XIAO_HEI_PERCEPTION_BASE_URL", DEFAULT_BASE_URL)
-        near_t = float(os.environ.get(
-            "XIAO_HEI_PERCEPTION_NEAR_THRESHOLD", str(PERCEPTION_NEAR_THRESHOLD),
-        ))
-        score_t = float(os.environ.get(
-            "XIAO_HEI_PERCEPTION_SCORE_THRESHOLD", str(DEFAULT_SCORE_THRESHOLD),
-        ))
-        min_inliers = int(os.environ.get(
-            "XIAO_HEI_PERCEPTION_MIN_INLIERS", str(DEFAULT_MIN_INLIERS),
-        ))
-        # Opt-in ObjectMap fusion (converged 3D boxes + NMS) — same flag as
-        # the perception responder. Off by default.
-        use_object_map = os.environ.get("XIAO_HEI_OBJECT_MAP", "").lower() in (
-            "1", "true", "yes", "on",
-        )
-
-        client = HTTPPerceptionClient(base_url=base_url)
-        client.wait_until_ready()       # blocks until the sidecar /healthz is green
-        lifter = PointLifter(min_inliers=min_inliers)
-        scan_accum = ScanAccumulator(
-            max_keyframes=int(os.environ.get("XIAO_HEI_SCAN_KEYFRAMES", "10")),
-            min_move_m=float(os.environ.get("XIAO_HEI_SCAN_MIN_MOVE_M", "0.25")),
-            min_rot_deg=float(os.environ.get("XIAO_HEI_SCAN_MIN_ROT_DEG", "15")),
-            voxel_m=float(os.environ.get("XIAO_HEI_SCAN_VOXEL_M", "0.05")),
-        )
-        vocab = Vocabulary()
-        object_map = None
-        if use_object_map:
-            from xiao_hei_vln.perception.object_map import ObjectMap
-            object_map = ObjectMap()
-
-        # No trajectory walk / no logger on the perception responder: it is
-        # driven purely via ingest() during the shared exploration sweep, and
-        # scene_gemini owns all logging.
-        perception = PerceptionResponder(
-            scene,
-            client=client,
-            lifter=lifter,
-            vocabulary=vocab,
-            near_threshold=near_t,
-            score_threshold=score_t,
-            trajectory_path=None,
-            object_map=object_map,
-            scan_accumulator=scan_accum,
-        )
-
-        # --- Gemini reasoning ------------------------------------------------
-        config = GeminiConfig.from_env()
-        engine = GeminiEngine(config)
-        engine.warmup()
-
-        logger = None
-        log_dir = os.environ.get("XIAO_HEI_VLM_LOG_DIR", "")
-        if log_dir:
-            # Never persist the API key into session.json.
-            safe_cfg = {k: v for k, v in asdict(config).items() if k != "api_key"}
-            logger = VLMLogger(
-                log_dir,
-                config={
-                    **safe_cfg,
-                    "perception_base_url": base_url,
-                    "score_threshold": score_t,
-                    "min_inliers": min_inliers,
-                    "object_map": use_object_map,
-                },
-                responder_name="scene_gemini",
-                tick_hz=TICK_HZ,
-            )
-        responder = SceneGeminiResponder(
-            engine, config, scene, perception=perception, logger=logger,
-        )
-        return responder, logger
     if name == "scene_claude":
         # Object reference, answered by Claude from the perception scene graph.
         #
         # The perception stack is built exactly as the `perception` branch above
         # builds it, and deliberately by copy rather than by refactoring that
-        # branch into a shared helper: `perception` and `scene_gemini` are what
-        # the submission currently scores with, and a shared constructor is a
-        # shared blast radius. The duplication is a few env reads.
+        # branch into a shared helper: `perception` is the other live consumer
+        # and a shared constructor would be a shared blast radius. The
+        # duplication is a few env reads.
         from dataclasses import asdict
 
         from xiao_hei_vln.logger import VLMLogger
@@ -377,7 +288,7 @@ def _build_responder(
         return responder, logger
     raise ValueError(
         f"Unknown XIAO_HEI_RESPONDER={name!r}; "
-        "expected one of: dummy, qwen, perception, scene_gemini, scene_claude",
+        "expected one of: dummy, qwen, perception, scene_claude",
     )
 
 
@@ -532,7 +443,6 @@ def main() -> None:
     node_name = {
         "qwen": "xiao_hei_qwen_vlm",
         "perception": "xiao_hei_perception_vlm",
-        "scene_gemini": "xiao_hei_scene_gemini_vlm",
         "scene_claude": "xiao_hei_scene_claude_vlm",
     }.get(RESPONDER_NAME, "xiao_hei_dummy_vlm")
     node: Node = rclpy.create_node(node_name)
@@ -582,7 +492,7 @@ def main() -> None:
     # /perception/objects), so the perception map can be watched while
     # driving. Perception-backed responders only — the scene is empty
     # otherwise. Opt out with XIAO_HEI_PUBLISH_MARKERS=0.
-    if RESPONDER_NAME in ("perception", "scene_gemini", "scene_claude") and os.environ.get(
+    if RESPONDER_NAME in ("perception", "scene_claude") and os.environ.get(
         "XIAO_HEI_PUBLISH_MARKERS", "1",
     ).lower() not in ("0", "false", "no", "off"):
         from xiao_hei_vln.app.scene_markers import ScenePublisher, Scoreboard

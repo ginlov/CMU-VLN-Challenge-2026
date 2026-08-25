@@ -2141,7 +2141,7 @@ def main() -> int:
                          f"currently {DEFAULT_HOST or 'unset'}); omit and leave "
                          "the variable unset if this IS the sim host")
     ap.add_argument("--container", default=CTR)
-    ap.add_argument("--backend", choices=["claude", "gemini"], default="claude")
+    ap.add_argument("--backend", choices=["claude"], default="claude")
     ap.add_argument("--model", default=None)
     ap.add_argument("--max-steps", type=int, default=6)
     ap.add_argument("--prompt-version", default=DEFAULT_PROMPT_VER,

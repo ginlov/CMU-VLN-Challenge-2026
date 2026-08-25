@@ -133,7 +133,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("snapshot")
     ap.add_argument("phrase")
-    ap.add_argument("--backend", choices=["claude", "gemini"], default="claude")
+    ap.add_argument("--backend", choices=["claude"], default="claude")
     ap.add_argument("--model", default=None)
     ap.add_argument("--cone-deg", type=float, default=2.0,
                     help="half-angle of the depth-sampling cone (default 2°)")

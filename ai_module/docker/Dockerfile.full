@@ -3,11 +3,11 @@
 # One container runs the whole submission pipeline (started by
 # `ros2 launch dummy_vlm dummy_vlm.launch`):
 #
-#   frontier exploration  →  perception scene graph (YOLO-World + SAM)  →  Gemini answer
+#   question-directed nav  →  perception scene graph (YOLO-World + SAM)  →  Claude answer
 #
 # Two Python stacks live side by side, kept apart on purpose:
 #   * SYSTEM python 3.12 (numpy 1.26)  — ROS 2 Jazzy + rclpy + our
-#     `xiao_hei_vln` package (the scene_gemini responder). rclpy is ABI-bound
+#     `xiao_hei_vln` package (the scene_claude responder). rclpy is ABI-bound
 #     to numpy 1.26, so this env must stay on numpy < 2.
 #   * /opt/perc-venv (numpy 2 / torch cu128) — the perception sidecar
 #     (YOLO-World v2 + SAM 2.1), served over HTTP on localhost:8001. Isolated
@@ -78,8 +78,11 @@ RUN curl -fsSL -o /opt/perception/models/yolov8x-worldv2.pt \
 # --break-system-packages: Ubuntu 24.04 marks the system Python
 # externally-managed; the accepted escape hatch inside an isolated image.
 # Editable install so a bind mount over src takes effect without reinstall.
-# Extras: gemini (google-genai) + perception (httpx/pycocotools HTTP client)
-# + exploration (matplotlib). No torch here — perception lives in the venv.
+# Extras: perception (httpx/pycocotools HTTP client) + exploration
+# (matplotlib). No torch here — perception lives in the venv. The `gemini`
+# extra (google-genai) is deliberately NOT installed: the team runs on one
+# model API, and leaving the SDK out means a stray XIAO_HEI_RESPONDER cannot
+# reach a Gemini call even if someone sets one.
 WORKDIR /opt/xiao_hei_vln
 COPY xiao_hei_vln/pyproject.toml xiao_hei_vln/README.md ./
 COPY xiao_hei_vln/src ./src
@@ -87,7 +90,7 @@ COPY xiao_hei_vln/src ./src
 # packages with no pip RECORD, which pip can't uninstall to upgrade; ignore
 # them and install our resolved set fresh into the same site-packages.
 RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed \
-        -e ".[gemini,perception,exploration]"
+        -e ".[perception,exploration]"
 
 # ===========================================================================
 # dummy_vlm launcher package (name kept for the eval's `ros2 launch` command)
@@ -101,23 +104,26 @@ RUN echo "source /home/docker/ai_module/install/setup.bash" >> /home/docker/.bas
 # ===========================================================================
 # Runtime configuration (baked into the image; override at `docker run -e`)
 # ===========================================================================
-# Gemini API token arrives as a build ARG — never committed as a literal
-# (GitHub push protection blocks committed secrets, and the repo is public).
-# The published image oel20/cmu-vln-ai-module:latest was built with the real
-# key passed in, so evaluation (which pulls that image) has it:
-#   docker build --build-arg XIAO_HEI_GEMINI_API_KEY=<key> -f docker/Dockerfile.full .
-ARG XIAO_HEI_GEMINI_API_KEY=REPLACE_WITH_YOUR_GEMINI_KEY
+# No Gemini key is baked into this image any more. The team runs on one model
+# API (Claude), so the SDK is not installed above and nothing here reads a
+# Gemini token.
+#
+# !! The key that WAS baked into the published oel20/cmu-vln-ai-module:latest
+# !! is still readable by anyone who pulls that public image — `docker inspect`
+# !! shows image ENV, no credentials needed. Removing it here does not unpublish
+# !! it. **That key must be rotated**, and this image rebuilt and re-pushed.
+#
+# ANTHROPIC_API_KEY is the only key this module needs, and it is passed in at
+# run time rather than baked — see ai_module/README.md.
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt \
-    XIAO_HEI_RESPONDER=scene_gemini \
+    XIAO_HEI_RESPONDER=scene_claude \
     XIAO_HEI_PERCEPTION_BASE_URL=http://localhost:8001 \
     XIAO_HEI_VLM_TICK_HZ=2.0 \
     # Frontier sweep budget — bounded so a scene stays within the 10-min
     # per-question eval limit. Tune per scene size.
     XIAO_HEI_EXPLORATION_MAX_WAYPOINTS=60 \
-    # From the build ARG above (real value baked into the published image).
-    XIAO_HEI_GEMINI_API_KEY=${XIAO_HEI_GEMINI_API_KEY} \
-    XIAO_HEI_GEMINI_MODEL=gemini-2.5-flash
+    XIAO_HEI_EXPLORATION_STRATEGY=nav_task1
 
 WORKDIR /home/docker/ai_module

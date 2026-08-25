@@ -262,7 +262,7 @@ def _sniff_mime(blob: bytes) -> str:
     """Detect MIME type from the first few bytes.
 
     Supports PNG and JPEG — the only formats produced by
-    :mod:`xiao_hei_vln.gemini.scene_rep`. Falls back to JPEG.
+    :mod:`xiao_hei_vln.scene_bundle`. Falls back to JPEG.
     """
     if blob[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"

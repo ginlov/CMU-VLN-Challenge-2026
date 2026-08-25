@@ -90,23 +90,20 @@ def wait_for_question(node, timeout: float) -> str | None:
     return got[0] if got else None
 
 
-# Which launch an object-reference question is handed to. Two pipelines exist
-# and they are a one-variable swap, because which of them scores better on the
-# held-out scenes is not something we have measured:
+# Which launch an object-reference question is handed to.
 #
-#   dummy_vlm scene_gemini.launch   frontier sweep, then Gemini answers from
-#                                   whatever the sweep collected.   (default)
-#   dummy_vlm scene_claude.launch   nav_task1 drives at the object the question
-#                                   names, then Claude picks the object_id.
+# One pipeline now: `nav_task1` drives at the object the question names, then
+# Claude picks the object_id out of the perception scene graph. The Gemini
+# sweep that used to answer these is gone — the team decided to run on one
+# model API, so the Gemini SDK is no longer installed in the image, no Gemini
+# key is baked into it, and `scene_gemini.launch` no longer exists.
 #
-# The default is the sweep because that is what the submission has been scored
-# with so far; changing it on no evidence could only lose points. Flip with
-#
-#     docker run -e XIAO_HEI_REFERENCE_LAUNCH="dummy_vlm scene_claude.launch"
-#
-# `XIAO_HEI_OTHER_LAUNCH` is still read, as the name this used to have.
+# Still a variable rather than a literal, because the hand-off is the seam
+# where a future pipeline would be swapped in and `os.execvp` should not need
+# editing to do it. Pointing it at a launch file that is not installed fails
+# loudly at exec, which is the correct outcome.
 REFERENCE_LAUNCH = os.environ.get("XIAO_HEI_REFERENCE_LAUNCH") or os.environ.get(
-    "XIAO_HEI_OTHER_LAUNCH", "dummy_vlm scene_gemini.launch")
+    "XIAO_HEI_OTHER_LAUNCH", "dummy_vlm scene_claude.launch")
 
 
 def handle_numerical(node, bot: RobotNode, question: str) -> int:
@@ -117,7 +114,7 @@ def handle_numerical(node, bot: RobotNode, question: str) -> int:
     questions are *anchor-local* — one piece of furniture, and the count is of
     small things on or above it — so answering one is finding an object and
     framing it, which is what the drive loop below already does. Object
-    reference stays with the perception + Gemini stack; see `hand_over`.
+    reference stays with the perception + Claude stack; see `hand_over`.
 
     It publishes whatever it counted. Silence was right while nothing was wired
     in, because a wrong integer scores the same 0 and looks in the log like a
@@ -162,12 +159,11 @@ def hand_over(node, question: str, kind: str) -> None:
     moves, then a model answering from it. That is a different process tree with
     a different Python environment, so this is a hand-off, not a function call.
 
-    Which pipeline is `REFERENCE_LAUNCH` (see above): the frontier sweep with
-    Gemini answering, or the question-directed `nav_task1` drive with Claude
-    answering. Re-launching rather than re-spawning the two processes by hand
-    means their startup semantics — ordering, logging, shutdown — are exactly
-    what was tested, and nothing here has to know how a uvicorn sidecar wants to
-    be started.
+    Which launch is `REFERENCE_LAUNCH` (see above); there is one, and it is the
+    question-directed `nav_task1` drive with Claude answering. Re-launching
+    rather than re-spawning its two processes by hand means their startup
+    semantics — ordering, logging, shutdown — are exactly what was tested, and
+    nothing here has to know how a uvicorn sidecar wants to be started.
 
     Two things make the hand-off safe:
 

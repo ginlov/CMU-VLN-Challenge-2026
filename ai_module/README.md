@@ -15,31 +15,20 @@ ros2 launch dummy_vlm dummy_vlm.launch
               ├── numerical ──▶ answers in this process
               │      → std_msgs/Int32 on /numerical_response
               │
-              └── object reference ──▶ exec one of two launches
-                     Both run the perception sidecar (YOLO-World v2 + SAM 2.1)
-                     and build the same scene graph. They differ in how the
-                     robot moves and who answers:
-
-                       scene_gemini.launch   frontier sweep, then Gemini
-                                             answers.            (default)
-                       scene_claude.launch   nav_task1 drives at the object the
-                                             question names, then Claude picks
-                                             the object_id.
-
+              └── object reference ──▶ exec scene_claude.launch
+                     The perception sidecar (YOLO-World v2 + SAM 2.1) builds
+                     the scene graph while `nav_task1` drives toward the object
+                     the question names; Claude then picks the referenced
+                     object_id out of the built graph.
                      → visualization_msgs/Marker on /selected_object_marker
 ```
 
-### Choosing the object-reference pipeline
-
-```bash
-docker run -e XIAO_HEI_REFERENCE_LAUNCH="dummy_vlm scene_claude.launch" ...
-```
-
-The default is the frontier sweep because that is what the submission has been
-scored with; which of the two does better on the held-out scenes is **not
-something we have measured**, and changing the default on no evidence could
-only lose points. Both are one variable apart so the comparison is cheap to
-run.
+**One model API.** Every question type is answered by Claude — classification,
+instruction following, numerical, and object reference. The Gemini pipeline
+that used to answer object reference has been removed: the `google-genai` SDK
+is not installed in the image, no Gemini key is baked into it, and
+`scene_gemini.launch` is gone. `XIAO_HEI_RESPONDER=scene_gemini` raises with
+that explanation rather than failing later on a missing key.
 
 The hand-off replaces the process rather than starting a second one. The
 explorer publishes waypoints as soon as it comes up, so exactly one of the two
@@ -50,9 +39,8 @@ repeats it at 1 Hz, so the pipeline that takes over receives it on its own.
 
 | | |
 |---|---|
-| **`ANTHROPIC_API_KEY`** | required, passed in at `docker run`. Instruction-following answers by calling the Claude API. |
-| Gemini key | already baked into the image (see `docker/Dockerfile.full`); nothing to pass. |
-| Network | outbound HTTPS to `api.anthropic.com` and the Gemini endpoint. |
+| **`ANTHROPIC_API_KEY`** | required, passed in at `docker run`. The only key this module needs — every question type calls the Claude API. |
+| Network | outbound HTTPS to `api.anthropic.com`. |
 | GPU | needed by the perception sidecar; the instruction-following stack is CPU-only. |
 
 ## Building and running
@@ -104,7 +92,7 @@ decided from `/state_estimation` alone.
 | `XIAO_HEI_MODEL` | `claude-opus-5` | |
 | `XIAO_HEI_GOTO_STEPS` | `20` | cap on grounding calls per destination; the real governor is the budget |
 | `XIAO_HEI_OUT` | `/tmp/xiao_hei_run` | per-step log destination |
-| `XIAO_HEI_REFERENCE_LAUNCH` | `dummy_vlm scene_gemini.launch` | which pipeline answers object reference; `dummy_vlm scene_claude.launch` for the Claude one |
+| `XIAO_HEI_REFERENCE_LAUNCH` | `dummy_vlm scene_claude.launch` | which launch answers object reference |
 | `XIAO_HEI_OTHER_LAUNCH` | — | the previous name for the above, still read |
 | `XIAO_HEI_NAV_VLM_MODEL` | `claude-opus-5` | model for `scene_claude` navigation and answering |
 | `XIAO_HEI_NAV_TASK1_COVERAGE_PLATEAU_S` | `45` | `scene_claude`: arrive once the scene graph stops gaining views for this long |
@@ -123,14 +111,13 @@ ai_module/
 │   ├── src/dummyVLM.py   installed as `dummyVLM` — the router
 │   └── launch/
 │       ├── dummy_vlm.launch    starts the router
-│       ├── scene_gemini.launch object reference via frontier sweep + Gemini
 │       └── scene_claude.launch object reference via nav_task1 + Claude
 ├── vlm/                  instruction-following, at /opt/xiao_hei/vlm
 │   ├── challenge_node.py question in, driven trajectory out
 │   ├── robot_node.py     ROS I/O: one frame of everything, or one waypoint
 │   ├── classify.py       which of the three question types arrived
 │   └── scripts/ perception/ src/
-├── xiao_hei_vln/         the perception + Gemini responder
+├── xiao_hei_vln/         the perception + scene_claude responder
 └── perception/           the sidecar it talks to
 ```
 

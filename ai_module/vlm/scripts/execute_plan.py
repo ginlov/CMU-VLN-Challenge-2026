@@ -648,7 +648,7 @@ def main() -> int:
                          f"currently {DEFAULT_HOST or 'unset'}); omit and leave "
                          "the variable unset if this IS the sim host")
     ap.add_argument("--container", default=CTR)
-    ap.add_argument("--backend", choices=["claude", "gemini"], default="claude")
+    ap.add_argument("--backend", choices=["claude"], default="claude")
     ap.add_argument("--model", default=None)
     ap.add_argument("--goto-steps", type=int, default=20,
                     help="safety cap on grounding calls per destination; the "
