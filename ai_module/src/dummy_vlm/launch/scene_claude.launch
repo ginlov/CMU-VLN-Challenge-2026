@@ -1,0 +1,52 @@
+<launch>
+
+  <!--
+    Team Xiao Hei — object reference (Task 2), answered by Claude.
+
+    The alternative to `scene_gemini.launch` for OBJECT_REFERENCE questions.
+    Both bring up the same perception sidecar and build the same scene graph;
+    they differ in how the robot moves and who answers:
+
+      scene_gemini   frontier exploration sweeps the whole scene, then Gemini
+                     answers from whatever the sweep collected.
+      scene_claude   the `nav_task1` explorer drives *toward the object the
+                     question names* — the model is shown the question plus the
+                     objects detected so far on every reach / skip event, and
+                     declares ARRIVED when it is there — then Claude picks the
+                     referenced `object_id` out of the built graph.
+
+    Two processes, same as scene_gemini:
+
+      1. Perception sidecar — YOLO-World v2 + SAM 2.1 over HTTP on
+         localhost:8001, in its own venv (/opt/perc-venv) so its numpy 2 /
+         torch stack stays clear of the ROS 2 (numpy 1.26) Python.
+      2. scene_claude node  — blocks on the sidecar's /healthz before it starts,
+         so no ordering or delay is needed here.
+
+    Requires ANTHROPIC_API_KEY — the same key the instruction-following stack
+    uses. Without it the node raises at boot rather than ten minutes in.
+
+    Selection is by environment, set here so the launch file is the whole
+    contract and the image does not have to be rebuilt to switch pipelines:
+    XIAO_HEI_RESPONDER=scene_claude picks the answerer, and
+    XIAO_HEI_EXPLORATION_STRATEGY=nav_task1 picks the question-directed
+    explorer. Setting one without the other is a misconfiguration — the
+    responder would wait for an explorer that never completes, or the explorer
+    would drive to the object and hand off to Gemini.
+  -->
+
+  <executable
+      cmd="/opt/perc-venv/bin/python -m uvicorn perception.server:app --host 0.0.0.0 --port 8001"
+      name="perception_sidecar"
+      cwd="/opt"
+      output="screen" />
+
+  <executable
+      cmd="xiao-hei-vlm"
+      name="xiao_hei_scene_claude"
+      output="screen">
+    <env name="XIAO_HEI_RESPONDER" value="scene_claude" />
+    <env name="XIAO_HEI_EXPLORATION_STRATEGY" value="nav_task1" />
+  </executable>
+
+</launch>

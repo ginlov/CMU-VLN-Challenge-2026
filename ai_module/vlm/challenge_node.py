@@ -90,7 +90,22 @@ def wait_for_question(node, timeout: float) -> str | None:
     return got[0] if got else None
 
 
-SCENE_GEMINI_LAUNCH = os.environ.get(
+# Which launch an object-reference question is handed to. Two pipelines exist
+# and they are a one-variable swap, because which of them scores better on the
+# held-out scenes is not something we have measured:
+#
+#   dummy_vlm scene_gemini.launch   frontier sweep, then Gemini answers from
+#                                   whatever the sweep collected.   (default)
+#   dummy_vlm scene_claude.launch   nav_task1 drives at the object the question
+#                                   names, then Claude picks the object_id.
+#
+# The default is the sweep because that is what the submission has been scored
+# with so far; changing it on no evidence could only lose points. Flip with
+#
+#     docker run -e XIAO_HEI_REFERENCE_LAUNCH="dummy_vlm scene_claude.launch"
+#
+# `XIAO_HEI_OTHER_LAUNCH` is still read, as the name this used to have.
+REFERENCE_LAUNCH = os.environ.get("XIAO_HEI_REFERENCE_LAUNCH") or os.environ.get(
     "XIAO_HEI_OTHER_LAUNCH", "dummy_vlm scene_gemini.launch")
 
 
@@ -140,19 +155,19 @@ def handle_numerical(node, bot: RobotNode, question: str) -> int:
 
 
 def hand_over(node, question: str, kind: str) -> None:
-    """Give the question to the perception + Gemini pipeline and get out of the way.
+    """Give the question to a perception-backed pipeline and get out of the way.
 
-    Numerical and object-reference questions are answered by the other half of
-    the team's stack: a YOLO-World + SAM 2.1 sidecar building a scene graph
-    while a frontier explorer sweeps, then Gemini answering from it. That is a
-    different process tree with a different Python environment, so this is a
-    hand-off, not a function call.
+    Object-reference questions are answered by the other half of the team's
+    stack: a YOLO-World + SAM 2.1 sidecar building a scene graph while the robot
+    moves, then a model answering from it. That is a different process tree with
+    a different Python environment, so this is a hand-off, not a function call.
 
-    `scene_gemini.launch` is their original `dummy_vlm.launch`, kept verbatim
-    under a new name. Re-launching it rather than re-spawning its two processes
-    by hand means their startup semantics — ordering, logging, shutdown — are
-    exactly what they tested, and nothing here has to know how a uvicorn
-    sidecar wants to be started.
+    Which pipeline is `REFERENCE_LAUNCH` (see above): the frontier sweep with
+    Gemini answering, or the question-directed `nav_task1` drive with Claude
+    answering. Re-launching rather than re-spawning the two processes by hand
+    means their startup semantics — ordering, logging, shutdown — are exactly
+    what was tested, and nothing here has to know how a uvicorn sidecar wants to
+    be started.
 
     Two things make the hand-off safe:
 
@@ -168,7 +183,7 @@ def hand_over(node, question: str, kind: str) -> None:
     The cost is the few seconds we spent waiting for the question and
     classifying it, out of 600.
     """
-    argv = ["ros2", "launch", *SCENE_GEMINI_LAUNCH.split()]
+    argv = ["ros2", "launch", *REFERENCE_LAUNCH.split()]
     node.get_logger().info(
         f"{kind} question — handing over to {' '.join(argv)} "
         f"({time.time() - T0:.0f}s into the budget): {question!r}")

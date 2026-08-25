@@ -22,6 +22,14 @@ Pick the responder with `XIAO_HEI_RESPONDER`:
                         `XIAO_HEI_GEMINI_API_KEY` and the perception
                         sidecar. Build with
                         `XIAO_HEI_EXTRA=perception,gemini,exploration`.
+  - `scene_claude`    — the object-reference (Task-2) pipeline. Same
+                        perception sidecar builds the scene graph, but the
+                        `nav_task1` explorer drives *toward the object the
+                        question names* instead of sweeping, and Claude
+                        picks the referenced `object_id` out of the built
+                        graph on arrival. Requires `ANTHROPIC_API_KEY`,
+                        the perception sidecar, and
+                        `XIAO_HEI_EXPLORATION_STRATEGY=nav_task1`.
 """
 
 from __future__ import annotations
@@ -264,17 +272,122 @@ def _build_responder(
             engine, config, scene, perception=perception, logger=logger,
         )
         return responder, logger
+    if name == "scene_claude":
+        # Object reference, answered by Claude from the perception scene graph.
+        #
+        # The perception stack is built exactly as the `perception` branch above
+        # builds it, and deliberately by copy rather than by refactoring that
+        # branch into a shared helper: `perception` and `scene_gemini` are what
+        # the submission currently scores with, and a shared constructor is a
+        # shared blast radius. The duplication is a few env reads.
+        from dataclasses import asdict
+
+        from xiao_hei_vln.logger import VLMLogger
+        from xiao_hei_vln.nav_vlm.config import NavVLMConfig
+        from xiao_hei_vln.nav_vlm.engine import AnthropicNavEngine
+        from xiao_hei_vln.perception import PerceptionResponder
+        from xiao_hei_vln.perception.client import (
+            DEFAULT_BASE_URL,
+            HTTPPerceptionClient,
+        )
+        from xiao_hei_vln.perception.lifter import DEFAULT_MIN_INLIERS, PointLifter
+        from xiao_hei_vln.perception.object_map import ObjectMap
+        from xiao_hei_vln.perception.responder import (
+            DEFAULT_NEAR_THRESHOLD as PERCEPTION_NEAR_THRESHOLD,
+        )
+        from xiao_hei_vln.perception.responder import DEFAULT_SCORE_THRESHOLD
+        from xiao_hei_vln.perception.scan_accumulator import ScanAccumulator
+        from xiao_hei_vln.perception.vocab import CROSS_SCENE_PRIOR, Vocabulary
+        from xiao_hei_vln.scene_claude import SceneClaudeResponder
+
+        base_url = os.environ.get("XIAO_HEI_PERCEPTION_BASE_URL", DEFAULT_BASE_URL)
+        near_t = float(os.environ.get(
+            "XIAO_HEI_PERCEPTION_NEAR_THRESHOLD", str(PERCEPTION_NEAR_THRESHOLD),
+        ))
+        score_t = float(os.environ.get(
+            "XIAO_HEI_PERCEPTION_SCORE_THRESHOLD", str(DEFAULT_SCORE_THRESHOLD),
+        ))
+        min_inliers = int(os.environ.get(
+            "XIAO_HEI_PERCEPTION_MIN_INLIERS", str(DEFAULT_MIN_INLIERS),
+        ))
+        traj_str = os.environ.get("XIAO_HEI_TRAJECTORY_JSON", "")
+        traj_path = Path(traj_str) if traj_str else None
+
+        client = HTTPPerceptionClient(base_url=base_url)
+        client.wait_until_ready()       # blocks until /healthz is green
+        lifter = PointLifter(min_inliers=min_inliers)
+        scan_accum = ScanAccumulator(
+            max_keyframes=int(os.environ.get("XIAO_HEI_SCAN_KEYFRAMES", "10")),
+            min_move_m=float(os.environ.get("XIAO_HEI_SCAN_MIN_MOVE_M", "0.25")),
+            min_rot_deg=float(os.environ.get("XIAO_HEI_SCAN_MIN_ROT_DEG", "15")),
+            voxel_m=float(os.environ.get("XIAO_HEI_SCAN_VOXEL_M", "0.05")),
+        )
+        # Unlike `perception`, ObjectMap fusion is ON by default here. The
+        # answer's `size` is read straight off the fused node's bbox, and a
+        # per-detection box from one frame is not an extent — it is one view of
+        # one. Opt out with XIAO_HEI_OBJECT_MAP=0.
+        use_object_map = os.environ.get("XIAO_HEI_OBJECT_MAP", "1").lower() not in (
+            "0", "false", "no", "off",
+        )
+        object_map = ObjectMap() if use_object_map else None
+
+        perception = PerceptionResponder(
+            scene,
+            client=client,
+            lifter=lifter,
+            # The cross-scene prior, not the shared arabic-skewed default:
+            # arrival is gated on the named class reaching the scene graph, and
+            # an open-vocabulary detector finds nothing it was not asked for.
+            vocabulary=Vocabulary(prior=CROSS_SCENE_PRIOR),
+            near_threshold=near_t,
+            score_threshold=score_t,
+            trajectory_path=traj_path,
+            take_waypoint_reached_signals=take_waypoint_reached_signals,
+            logger=None,                 # scene_claude owns all logging
+            object_map=object_map,
+            scan_accumulator=scan_accum,
+        )
+
+        # Raises if there is no Anthropic key: the answerer cannot do anything
+        # without one, and failing at boot beats failing ten minutes in.
+        cfg = NavVLMConfig.from_env()
+        engine = AnthropicNavEngine(cfg)
+
+        logger = None
+        log_dir = os.environ.get("XIAO_HEI_VLM_LOG_DIR", "")
+        if log_dir:
+            # Never persist the API key into session.json.
+            safe_cfg = {k: v for k, v in asdict(cfg).items() if k != "api_key"}
+            logger = VLMLogger(
+                log_dir,
+                config={
+                    **safe_cfg,
+                    "perception_base_url": base_url,
+                    "near_threshold_m": near_t,
+                    "score_threshold": score_t,
+                    "min_inliers": min_inliers,
+                    "object_map": use_object_map,
+                },
+                responder_name="scene_claude",
+                tick_hz=TICK_HZ,
+            )
+        responder = SceneClaudeResponder(
+            engine, cfg, scene, perception=perception, logger=logger,
+        )
+        return responder, logger
     raise ValueError(
         f"Unknown XIAO_HEI_RESPONDER={name!r}; "
-        "expected one of: dummy, qwen, perception, scene_gemini",
+        "expected one of: dummy, qwen, perception, scene_gemini, scene_claude",
     )
 
 
-def _build_explorer(node):
+def _build_explorer(node, scene: SceneRepresentation | None = None):
     """Instantiate the configured exploration strategy, or None if disabled.
 
     Select the strategy with XIAO_HEI_EXPLORATION_STRATEGY (default: frontier).
-    Add new strategies here as additional elif branches.
+    Add new strategies here as additional elif branches. ``scene`` is the shared
+    scene graph, needed by question-directed strategies (``nav_task1``) that
+    reason over the objects detected so far; the undirected ones ignore it.
     """
     if _EXPLORATION_MAX_WAYPOINTS <= 0:
         return None
@@ -287,6 +400,82 @@ def _build_explorer(node):
             max_waypoint_dist=_EXPLORATION_MAX_WAYPOINT_DIST,
             stuck_timeout_s=12.0,
             max_consecutive_skips=20,
+        )
+    elif _EXPLORATION_STRATEGY == "nav_vlm":
+        # Undirected VLM waypoint proposer. Fails soft: a missing Anthropic key
+        # disables exploration rather than taking the whole node down at boot.
+        from xiao_hei_vln.exploration import NavVLMExplorer
+        from xiao_hei_vln.nav_vlm import AnthropicNavEngine, NavVLMConfig
+
+        try:
+            cfg = NavVLMConfig.from_env()
+        except ValueError as exc:
+            node.get_logger().error(
+                f"nav_vlm strategy selected but {exc} — disabling exploration."
+            )
+            return None
+        explorer = NavVLMExplorer(
+            AnthropicNavEngine(cfg),
+            config=cfg,
+            max_waypoints=_EXPLORATION_MAX_WAYPOINTS,
+            waypoint_reach_dist=0.3,
+            max_hop_m=_EXPLORATION_MAX_WAYPOINT_DIST,
+        )
+    elif _EXPLORATION_STRATEGY == "nav_task1":
+        # Question-directed: drive to the object an OBJECT_REFERENCE question
+        # names, then let the scene_claude responder answer. Fails soft on a
+        # missing key, like nav_vlm.
+        from xiao_hei_vln.exploration import NavTask1Explorer
+        from xiao_hei_vln.nav_vlm import AnthropicNavEngine, NavVLMConfig
+        from xiao_hei_vln.nav_vlm.task1_prompts import (
+            NAV_SYSTEM_PROMPT,
+            PROPOSE_OR_ARRIVE_TOOL,
+        )
+
+        try:
+            cfg = NavVLMConfig.from_env()
+        except ValueError as exc:
+            node.get_logger().error(
+                f"nav_task1 strategy selected but {exc} — disabling exploration."
+            )
+            return None
+        engine = AnthropicNavEngine(
+            cfg, system_prompt=NAV_SYSTEM_PROMPT, tool=PROPOSE_OR_ARRIVE_TOOL,
+        )
+        # The per-question budget is TOTAL (navigation + answering), so
+        # navigation has to stop early enough that the final Claude call still
+        # lands inside it: nav deadline = total - answer reserve.
+        _t1_total_s = float(os.environ.get("XIAO_HEI_NAV_TASK1_MAX_QUESTION_S") or "600")
+        _t1_answer_reserve_s = float(
+            os.environ.get("XIAO_HEI_NAV_TASK1_ANSWER_RESERVE_S") or "60"
+        )
+        explorer = NavTask1Explorer(
+            engine,
+            scene=scene,
+            config=cfg,
+            max_waypoints=_EXPLORATION_MAX_WAYPOINTS,
+            waypoint_reach_dist=0.3,
+            max_hop_m=_EXPLORATION_MAX_WAYPOINT_DIST,
+            # Skip-cap termination is off: the reach/explore mode machine falls
+            # back to exploring when reach stalls, and the per-question time
+            # budget is the only hard stop.
+            max_consecutive_skips=1_000_000,
+            max_question_seconds=max(30.0, _t1_total_s - _t1_answer_reserve_s),
+            # Arrive once the graph stops gaining new views for this long — it
+            # has seen every reachable angle — instead of running to the cap.
+            coverage_plateau_s=float(
+                os.environ.get("XIAO_HEI_NAV_TASK1_COVERAGE_PLATEAU_S") or "45"
+            ),
+            # Left at None deliberately: the detector-feedback loops these drive
+            # (dynamic vocabulary, per-class threshold relaxation) need
+            # `Vocabulary(dynamic=...)` and `PerceptionResponder(class_thresholds=...)`,
+            # which this repository's perception package does not carry yet.
+            # NavTask1Explorer no-ops both when they are None. See the PR body.
+            dynamic_vocab=None,
+            class_thresholds=None,
+            default_score_threshold=float(
+                os.environ.get("XIAO_HEI_PERCEPTION_SCORE_THRESHOLD") or "0.4"
+            ),
         )
     else:
         node.get_logger().error(
@@ -344,6 +533,7 @@ def main() -> None:
         "qwen": "xiao_hei_qwen_vlm",
         "perception": "xiao_hei_perception_vlm",
         "scene_gemini": "xiao_hei_scene_gemini_vlm",
+        "scene_claude": "xiao_hei_scene_claude_vlm",
     }.get(RESPONDER_NAME, "xiao_hei_dummy_vlm")
     node: Node = rclpy.create_node(node_name)
 
@@ -392,7 +582,7 @@ def main() -> None:
     # /perception/objects), so the perception map can be watched while
     # driving. Perception-backed responders only — the scene is empty
     # otherwise. Opt out with XIAO_HEI_PUBLISH_MARKERS=0.
-    if RESPONDER_NAME in ("perception", "scene_gemini") and os.environ.get(
+    if RESPONDER_NAME in ("perception", "scene_gemini", "scene_claude") and os.environ.get(
         "XIAO_HEI_PUBLISH_MARKERS", "1",
     ).lower() not in ("0", "false", "no", "off"):
         from xiao_hei_vln.app.scene_markers import ScenePublisher, Scoreboard
@@ -441,7 +631,7 @@ def main() -> None:
 
         node.create_timer(2.0, _dump_scene)
 
-    explorer = _build_explorer(node)
+    explorer = _build_explorer(node, scene)
 
     # Structured exploration log — survives the container via the mounted volume.
     # Create the dir if it doesn't exist so a run without a bind-mounted

@@ -18,6 +18,20 @@ frontier (default)
     ``terrain_map_ext`` snapshots and navigates toward the largest nearby
     frontier cluster.  Stops when ``max_waypoints`` have been visited.
 
+nav_vlm
+    ``NavVLMExplorer`` — asks a vision-language model for the next waypoint on
+    each reach / cannot-reach event, snapping the pick to a grid-reachable free
+    cell.  Select with ``XIAO_HEI_EXPLORATION_STRATEGY=nav_vlm`` (needs an
+    Anthropic key).
+
+nav_task1
+    ``NavTask1Explorer`` — the question-directed variant of ``nav_vlm``: it
+    drives toward the object named in an OBJECT_REFERENCE question (feeding the
+    model the question plus the objects detected so far) and completes when the
+    model declares arrival, at which point the ``scene_claude`` responder
+    answers from the built scene graph.  Select with
+    ``XIAO_HEI_EXPLORATION_STRATEGY=nav_task1``.
+
 Visualisation
 -------------
 save_exploration_plot(visited_waypoints, grid, output_path)
@@ -46,6 +60,14 @@ class ExplorationStrategy(Protocol):
 
 
 from xiao_hei_vln.exploration._frontier import FrontierExplorer
+from xiao_hei_vln.exploration._nav_task1 import NavTask1Explorer
+from xiao_hei_vln.exploration._nav_vlm import NavVLMExplorer
 from xiao_hei_vln.exploration._visualize import save_exploration_plot
 
-__all__ = ["ExplorationStrategy", "FrontierExplorer", "save_exploration_plot"]
+__all__ = [
+    "ExplorationStrategy",
+    "FrontierExplorer",
+    "NavTask1Explorer",
+    "NavVLMExplorer",
+    "save_exploration_plot",
+]
