@@ -1,6 +1,6 @@
 """Render the exploration occupancy grid to a top-down PNG for the VLM.
 
-Unlike :mod:`xiao_hei_vln.gemini.scene_rep` (which renders the perception
+Unlike :mod:`xiao_hei_vln.scene_bundle` (which renders the perception
 ``GlobalMap``), this works directly off the exploration
 :class:`~xiao_hei_vln.exploration._grid.OccupancyGrid`, so the proposer is
 self-contained and runs on the same belief map the geometric explorers use —

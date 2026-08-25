@@ -12,8 +12,9 @@
 #   `ros2 launch dummy_vlm dummy_vlm.launch` starts the router, which reads
 #   the question and picks the stack that answers it:
 #     instruction-following -> VLM grounding + lidar lift + waypoints (here)
-#     numerical / reference -> exploration + perception scene graph + Gemini
-#                              (scene_gemini.launch, unchanged)
+#     numerical             -> answered in that same process
+#     object reference      -> question-directed nav + perception scene graph
+#                              + Claude (scene_claude.launch)
 FROM oel20/cmu-vln-ai-module:latest
 
 USER root
@@ -88,10 +89,10 @@ COPY xiao_hei_vln/src /opt/xiao_hei_vln/src
 # `RESPONDER_NAME = os.environ.get("XIAO_HEI_RESPONDER", "dummy")` to **dummy** —
 # the deterministic port of the C++ dummy node, which answers numerical
 # questions with a random integer and object-reference with canned fixtures.
-# Both `Dockerfile.full` and `scene_gemini.launch` document the intent as the
-# scene_gemini pipeline, so this is a missing variable rather than a choice.
-# Stated here so the hand-off lands on the pipeline it names.
-ENV XIAO_HEI_RESPONDER=scene_gemini
+# a missing variable rather than a choice. Stated here so the hand-off lands on
+# the pipeline `scene_claude.launch` names. The launch file sets it too; this is
+# the belt to that pipeline's braces, and covers a bare `xiao-hei-vlm`.
+ENV XIAO_HEI_RESPONDER=scene_claude
 
 # --- the ament package -------------------------------------------------------
 # Nothing is compiled; colcon installs the two launch files and the `dummyVLM`

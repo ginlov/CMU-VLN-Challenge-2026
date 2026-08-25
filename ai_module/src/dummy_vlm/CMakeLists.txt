@@ -11,9 +11,9 @@ find_package(ament_cmake REQUIRED)
 #
 # `dummyVLM` is the router (see vlm/challenge_node.py). It reads the question,
 # decides which of the team's two stacks should answer it, and either drives
-# the instruction itself or hands the process over to one of the object-
-# reference launches — scene_gemini.launch (default) or scene_claude.launch.
-# Both are installed by the DIRECTORY rule below; neither is named here.
+# the instruction itself or hands the process over to scene_claude.launch for
+# object reference. The launch files are installed by the DIRECTORY rule below
+# rather than named here, so adding one needs no change to this file.
 #
 # Note there is no `data` directory to install any more — the canned waypoints
 # and object list moved into the xiao_hei_vln package when the C++ node was

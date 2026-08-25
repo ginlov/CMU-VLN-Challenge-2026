@@ -647,14 +647,13 @@ def main() -> int:
     ap.add_argument("snapshots", nargs="+",
                     help="one snapshot, or two to triangulate across the move")
     ap.add_argument("phrase")
-    ap.add_argument("--backend", choices=["claude", "gemini"], default="claude")
+    ap.add_argument("--backend", choices=["claude"], default="claude")
     ap.add_argument("--model", default=None)
     ap.add_argument("--sigma-deg", type=float, default=1.0,
                     help="assumed bearing error, for the triangulation budget")
     args = ap.parse_args()
 
-    model = args.model or ("claude-opus-5" if args.backend == "claude"
-                           else "gemini-2.5-flash")
+    model = args.model or "claude-opus-5"
     seen, prev_crop = [], None
     for s in args.snapshots:
         d = Path(s)

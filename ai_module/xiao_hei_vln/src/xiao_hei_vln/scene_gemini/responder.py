@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 from xiao_hei_vln.gemini.config import GeminiConfig
 from xiao_hei_vln.gemini.engine import GeminiEngineProtocol
 from xiao_hei_vln.gemini.prompts import build_system_prompt, build_user_message
-from xiao_hei_vln.gemini.scene_rep import build_bundle, serialize_for_gemini
+from xiao_hei_vln.scene_bundle import build_bundle, serialize_for_gemini
 from xiao_hei_vln.messages import (
     QuestionType,
     VLMInput,

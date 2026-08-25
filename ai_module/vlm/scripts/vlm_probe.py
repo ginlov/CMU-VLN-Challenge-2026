@@ -14,8 +14,7 @@ every constraint after it.
     uv run --with anthropic python scripts/vlm_probe.py snaps/start \
         "the tea table with the elephant figurine on it"
 
-    uv run --with google-genai python scripts/vlm_probe.py snaps/start \
-        "the folding screen" --backend gemini
+    uv run python scripts/vlm_probe.py snaps/start "the folding screen"
 """
 
 from __future__ import annotations
@@ -740,63 +739,21 @@ def ask_claude(prompt: str, images: list[bytes], model: str,
     return "".join(b.text for b in msg.content if b.type == "text")
 
 
-_GENAI = None       # the one long-lived client; see `ask_gemini`
-
-
 def ask_gemini(prompt: str, images: list[bytes], model: str,
                previous: bytes | None = None) -> str:
-    from google import genai
-    from google.genai import types
+    """Removed. The module runs on one model API.
 
-    key = os.environ.get("XIAO_HEI_GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if not key:
-        raise SystemExit("set XIAO_HEI_GEMINI_API_KEY (or GEMINI_API_KEY)")
-    parts: list = []
-    if previous is not None:
-        parts.append("previous view of the target (from further away):")
-        parts.append(types.Part.from_bytes(data=previous, mime_type="image/jpeg"))
-    for i, raw in enumerate(images):
-        parts.append(f"image {i} ({NAMES[i]}, heading {HEADINGS[i]}°):")
-        parts.append(types.Part.from_bytes(data=raw, mime_type="image/jpeg"))
-    parts.append(prompt)
-    # Bound to a name, and kept: built inline as
-    # `genai.Client(...).models.generate_content(...)` the client is a
-    # temporary, and the SDK closes its httpx session when it is collected —
-    # which happens before the request goes out. Every call raised
-    # `RuntimeError: Cannot send a request, as the client has been closed`, so
-    # `--backend gemini` had never once completed a call. Cached because a leg
-    # makes ten of these and each new client is a fresh TLS handshake.
-    global _GENAI
-    if _GENAI is None:
-        _GENAI = genai.Client(api_key=key, http_options=types.HttpOptions(
-            retry_options=types.HttpRetryOptions(
-                attempts=int(os.environ.get("XIAO_HEI_API_MAX_RETRIES", "8")))))
-    r = _GENAI.models.generate_content(
-        model=model, contents=parts,
-        # Matching `ask_claude`: v4 asks for every candidate and anchor with a
-        # note each, and a truncated reply comes back as "unparseable", which
-        # reads as a model failure and is a budget failure. Gemini bills its
-        # thinking against this same ceiling, and the 3.x models think without
-        # being asked — measured 676 thinking tokens against 251 of answer on
-        # one `gemini-3.1-pro-preview` grounding call — so the budget has to
-        # cover both or a correct answer never gets written.
-        config=types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=int(os.environ.get(
-                "XIAO_HEI_GEMINI_MAX_TOKENS", "8192"))))
-    # `r.text` is None when nothing textual survived, which is what truncation
-    # mid-thought looks like from here. Say which it was.
-    reason = str(getattr(getattr(r, "candidates", [None])[0], "finish_reason",
-                         "") or "") if getattr(r, "candidates", None) else ""
-    if "MAX_TOKENS" in reason.upper():
-        used = getattr(getattr(r, "usage_metadata", None),
-                       "thoughts_token_count", None)
-        raise RuntimeError(
-            f"reply hit max_output_tokens and is truncated (thinking used "
-            f"{used} tokens) — raise XIAO_HEI_GEMINI_MAX_TOKENS rather than "
-            f"treating this as a bad reply")
-    return r.text or ""
-
+    The symbol is kept because four sibling scripts import it by name, and an
+    ImportError at module load would take out the `--backend claude` path they
+    are actually used for. Selecting it is no longer possible from the CLI
+    either — "gemini" is gone from every `--backend` choices list — so reaching
+    this is a programming error rather than a configuration one.
+    """
+    raise SystemExit(
+        "the gemini backend was removed: this module runs on the Claude API "
+        "only. The google-genai SDK is not installed in the image and no "
+        "Gemini key is baked into it. Use --backend claude."
+    )
 
 def parse(text: str) -> dict | None:
     """Pull the answer out, fence or no fence, one object or several.
@@ -890,7 +847,7 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("snapshot", help="directory written by scripts/snap.sh")
     ap.add_argument("phrase", help="the referring expression, verbatim")
-    ap.add_argument("--backend", choices=["claude", "gemini"], default="claude")
+    ap.add_argument("--backend", choices=["claude"], default="claude")
     ap.add_argument("--model", default=None)
     ap.add_argument("--raw", action="store_true", help="print the reply as-is")
     ap.add_argument("--scan-from", default=None, metavar="DIR",

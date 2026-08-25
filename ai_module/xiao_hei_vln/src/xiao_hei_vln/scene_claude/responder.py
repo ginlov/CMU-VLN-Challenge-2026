@@ -215,9 +215,13 @@ class SceneClaudeResponder:
         """Occupancy map + latest panorama, best-effort (never fail the answer)."""
         images: list[tuple[bytes, str]] = []
         try:
-            # Reuse the backend-agnostic serialization from the gemini package
-            # (no google SDK is imported by these helpers).
-            from xiao_hei_vln.gemini.scene_rep import build_bundle
+            # Backend-agnostic scene serialization. It used to live in the
+            # `gemini` package and was imported from there by name, which made
+            # the Claude answering path look like it depended on the Gemini one.
+            # It never did — these helpers touch no SDK — so it now lives at
+            # `xiao_hei_vln.scene_bundle`, where both responders can reach it
+            # without either owning it.
+            from xiao_hei_vln.scene_bundle import build_bundle
 
             bundle = build_bundle(
                 snapshot=snapshot,

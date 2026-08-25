@@ -15,8 +15,8 @@ Instruction-following drives the trajectory here. Numerical counts here too:
 eleven of the fifteen released counting questions are anchor-local — one piece
 of furniture, count what is on it — which is the drive loop's own problem
 shape, so it answers in-process rather than handing the budget away. Object
-reference still goes to the perception + Gemini pipeline, which
-`challenge_node` hands the process over to.
+reference goes to the perception + Claude pipeline, which `challenge_node`
+hands the process over to.
 
 So this decision picks which of the team's two stacks spends the ten minutes,
 it is made once from the sentence alone before either has done anything, and
