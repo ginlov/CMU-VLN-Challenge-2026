@@ -47,6 +47,26 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
 COPY vlm /opt/xiao_hei/vlm
 ENV XIAO_HEI_VLM_DIR=/opt/xiao_hei/vlm
 
+# --- the object-reference stack ----------------------------------------------
+# `xiao_hei_vln` is baked into the base image, so until now nothing in this
+# repository's `ai_module/xiao_hei_vln/` could reach a container built from
+# THIS file — and this file is what `docker/compose*.yml` builds. Edits to the
+# responder package were silently inert unless the base image was rebuilt and
+# pushed. Copying the source over fixes that.
+#
+# A copy, not a `pip install`: Dockerfile.full installs the package **editable**
+# (`pip install -e`) at /opt/xiao_hei_vln, so imports resolve through this
+# source tree and overwriting it takes effect with no reinstall. That matters —
+# a reinstall would re-resolve dependencies, and re-resolving is exactly how
+# system python ended up on numpy 2 and `import cv2` started failing (see
+# above). No new third-party dependency is introduced by this stack: it needs
+# httpx, matplotlib, pillow and numpy, all of which the Gemini pipeline already
+# pulled in, plus `anthropic`, installed above.
+#
+# Caveat for whoever touches this next: `pyproject.toml` is NOT re-read, so a
+# new dependency or entry point still needs a base-image rebuild.
+COPY xiao_hei_vln/src /opt/xiao_hei_vln/src
+
 # PYTHONPATH is deliberately NOT extended here, and that is load-bearing.
 #
 # Both halves of this module ship a package called `xiao_hei_vln`, and they are

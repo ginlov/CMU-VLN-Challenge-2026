@@ -12,10 +12,15 @@
 
       instruction-following  -> drives the route itself (VLM grounding +
                                 lidar lift + waypoints), in this process;
-      numerical / reference  -> hands the process over to
-                                `scene_gemini.launch`, which is the previous
-                                pipeline (perception sidecar + frontier
-                                exploration + Gemini) kept verbatim.
+      numerical              -> answers in this process too;
+      object reference       -> hands the process over to one of two
+                                perception-backed pipelines, chosen by
+                                XIAO_HEI_REFERENCE_LAUNCH:
+                                  scene_gemini.launch  frontier sweep, then
+                                                       Gemini answers (default)
+                                  scene_claude.launch  nav_task1 drives at the
+                                                       named object, then
+                                                       Claude answers
 
     One process at a time, by construction: the hand-off `exec`s. That matters
     because the frontier explorer publishes waypoints from the moment it
