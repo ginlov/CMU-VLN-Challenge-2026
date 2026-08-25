@@ -166,3 +166,40 @@ RUN printf '%s\n' \
       'fi' \
     > /etc/xiao_hei_setup.sh
 ENV BASH_ENV=/etc/xiao_hei_setup.sh
+
+# --- the API key -------------------------------------------------------------
+# The key is NOT in this repository and NOT in any image we publish. It is
+# supplied with the submission and injected here at build time:
+#
+#     docker compose -f compose_gpu.yml build \
+#         --build-arg ANTHROPIC_API_KEY=<the key from the submission>
+#     docker compose -f compose_gpu.yml up -d
+#
+# Build time rather than run time, because `docker/compose*.yml` declares no
+# `environment:` block for this service and lives outside `ai_module/`, which
+# the challenge README says is the only folder a submission may change. So
+# nothing exported on the host reaches the container, and a `docker exec`
+# export is lost the moment the container is restarted — which evaluation does
+# for every question ("the system will be relaunched for each language command
+# tested"). An ARG baked to ENV survives `up`, `restart` and `run` alike.
+#
+# Last in the file so that changing the key rebuilds this layer only.
+#
+# Left empty when the argument is not passed. That is deliberate and not a
+# fallback: `challenge_node.py` checks for it at boot and exits with a message
+# naming the variable, rather than driving somewhere first and failing on the
+# call that was supposed to decide where to drive.
+ARG ANTHROPIC_API_KEY=""
+ENV ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+# The base image on Docker Hub predates the move to a single model API and
+# still carries a `XIAO_HEI_GEMINI_API_KEY` in its ENV, which `FROM` inherits.
+# That key has been revoked, so this is tidiness rather than exposure — but a
+# submitted image should not ship a key-shaped string that a grader has to
+# reason about, and blanking it here is cheaper than rebuilding and re-pushing
+# a 10 GB base. Nothing reads it: the Gemini SDK is not installed and
+# `ask_gemini()` refuses.
+#
+# Dockerfiles cannot delete an inherited variable, only empty it. Empty is
+# enough — the value is what mattered.
+ENV XIAO_HEI_GEMINI_API_KEY=""

@@ -39,7 +39,7 @@ repeats it at 1 Hz, so the pipeline that takes over receives it on its own.
 
 | | |
 |---|---|
-| **`ANTHROPIC_API_KEY`** | required, passed in at `docker run`. The only key this module needs — every question type calls the Claude API. |
+| **`ANTHROPIC_API_KEY`** | required. Supplied with the submission and passed to `docker compose build --build-arg` — see [Supplying the API key](#supplying-the-api-key). It is not in this repository and not in any image we publish. The only key this module needs; every question type calls the Claude API. |
 | Network | outbound HTTPS to `api.anthropic.com`. |
 | GPU | needed by the perception sidecar; the instruction-following stack is CPU-only. |
 
@@ -55,12 +55,14 @@ starts nothing.
 ```bash
 xhost +
 cd docker
-docker compose -f compose_gpu.yml up --build -d   # compose.yml without a GPU
+docker compose -f compose_gpu.yml build --build-arg ANTHROPIC_API_KEY=<the key>
+docker compose -f compose_gpu.yml up -d          # compose.yml without a GPU
 ```
 
-`--build` is what picks up changes under `ai_module/`. Two containers start:
-`iros2026_system` (simulator + autonomy stack) and `iros2026_ai_module` (this
-module).
+Build and up are two commands rather than `up --build`, because `up` takes no
+`--build-arg`. Building is what picks up changes under `ai_module/`. Two
+containers start: `iros2026_system` (simulator + autonomy stack) and
+`iros2026_ai_module` (this module).
 
 **2. Start the base autonomy system** — nothing moves without it:
 
@@ -73,28 +75,71 @@ docker exec -it iros2026_system bash
 
 ```bash
 docker exec -it iros2026_ai_module bash
-export ANTHROPIC_API_KEY=...          # supplied separately — see the note below
 ros2 launch dummy_vlm dummy_vlm.launch
 ```
 
-> [!IMPORTANT]
-> **The key has to be exported inside that shell.** The `ai_module` service in
-> `docker/compose*.yml` declares no `environment:` block, so nothing from the
-> host environment reaches the container — exporting `ANTHROPIC_API_KEY` on the
-> host before `docker compose up` does nothing. `docker exec` inherits the
-> container's environment, so the export above is what the launch actually
-> reads.
->
-> To pass it from the host instead, add this to the `ai_module` service and
-> export the variable before `up`:
->
-> ```yaml
->     environment:
->       - ANTHROPIC_API_KEY
-> ```
->
-> That file is outside `ai_module/`, which the challenge README says is the
-> only folder a submission should change, so it is not edited here.
+No export here: the key went in at build time above.
+
+### Supplying the API key
+
+**The key is not in this repository and not in any image we publish.** It is
+sent with the submission, and goes in at build time:
+
+```bash
+cd docker
+docker compose -f compose_gpu.yml build --build-arg ANTHROPIC_API_KEY=<the key>
+docker compose -f compose_gpu.yml up -d
+```
+
+That is all. The key is now part of the image on your machine, so it is there
+for every `up`, every `restart` and every `docker compose run` — including the
+relaunch between questions — and nothing has to be exported before a launch.
+
+To confirm it landed, before starting anything:
+
+```bash
+docker compose -f compose_gpu.yml run --rm --no-deps --entrypoint sh ai_module \
+  -c 'test -n "$ANTHROPIC_API_KEY" && echo key present || echo KEY MISSING'
+```
+
+If it is missing, the module says so at boot and exits instead of driving
+somewhere first:
+
+```
+ANTHROPIC_API_KEY is not set — this module answers by calling the Claude API
+and can do nothing without it.
+```
+
+<details>
+<summary>Why build time, and what to do if you would rather not rebuild</summary>
+
+The `ai_module` service in `docker/compose*.yml` declares no `environment:`
+block, so **nothing exported on the host reaches the container** — `export
+ANTHROPIC_API_KEY=...` before `docker compose up` has no effect. That file sits
+outside `ai_module/`, which the challenge README names as the only folder a
+submission should change, so it is left alone.
+
+A one-off session can pass the key straight to `docker exec`, which avoids a
+rebuild but has to be repeated for every shell, and is lost when the container
+restarts:
+
+```bash
+docker exec -it -e ANTHROPIC_API_KEY=<the key> iros2026_ai_module bash
+ros2 launch dummy_vlm dummy_vlm.launch
+```
+
+If editing the compose file is acceptable after all, adding
+
+```yaml
+    environment:
+      - ANTHROPIC_API_KEY
+```
+
+to the `ai_module` service lets the host environment through, and `--build-arg`
+is then unnecessary. Any of the three works; the build-time one is the default
+here only because it needs no repetition and survives a restart.
+
+</details>
 
 **4. Send a question** (either container — they share the ROS graph):
 

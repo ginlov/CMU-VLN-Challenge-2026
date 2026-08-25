@@ -108,13 +108,15 @@ RUN echo "source /home/docker/ai_module/install/setup.bash" >> /home/docker/.bas
 # API (Claude), so the SDK is not installed above and nothing here reads a
 # Gemini token.
 #
-# !! The key that WAS baked into the published oel20/cmu-vln-ai-module:latest
-# !! is still readable by anyone who pulls that public image — `docker inspect`
-# !! shows image ENV, no credentials needed. Removing it here does not unpublish
-# !! it. **That key must be rotated**, and this image rebuilt and re-pushed.
+# A Gemini key WAS baked into the published oel20/cmu-vln-ai-module:latest, and
+# image ENV is readable by anyone who pulls a public image (`docker inspect`, no
+# credentials needed). Deleting the line here did not unpublish it, so the key
+# itself was revoked. Keep it that way: never bake a live credential into an
+# image that gets pushed to a public registry.
 #
-# ANTHROPIC_API_KEY is the only key this module needs, and it is passed in at
-# run time rather than baked — see ai_module/README.md.
+# ANTHROPIC_API_KEY is the only key this module needs, and it is deliberately
+# NOT here — it is injected into the thin `Dockerfile` at build time by whoever
+# runs the evaluation. See ai_module/README.md, "Supplying the API key".
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt \
