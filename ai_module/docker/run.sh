@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# ANTHROPIC_API_KEY is required for instruction-following questions: that
-# stack answers by calling the Claude API. It is the only key passed in from
-# outside — the Gemini key used by the numerical / object-reference pipeline
-# is baked into the image as ENV (see docker/Dockerfile.full).
+# ANTHROPIC_API_KEY is required, and it is the only key this module needs:
+# every question type — classification, instruction following, numerical and
+# object reference — is answered by calling the Claude API. No key is baked
+# into the image.
 if [ -z "$ANTHROPIC_API_KEY" ]; then
-  echo "warning: ANTHROPIC_API_KEY is not set in this shell; instruction-" >&2
-  echo "         following questions will fail. See ai_module/README.md." >&2
+  echo "warning: ANTHROPIC_API_KEY is not set in this shell; every question" >&2
+  echo "         type will fail. See ai_module/README.md." >&2
 fi
 
 # Use GPU flags if nvidia-smi is available

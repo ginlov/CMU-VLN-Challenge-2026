@@ -45,16 +45,82 @@ repeats it at 1 Hz, so the pipeline that takes over receives it on its own.
 
 ## Building and running
 
-```bash
-cd ai_module
-docker/build.sh                       # adds our layers to oel20/cmu-vln-ai-module:latest
+This is the flow `docker/README.md` at the repository root documents, and the
+one evaluation uses. Both containers come from the root `docker/` compose
+files, not from `ai_module/docker/build.sh` — that script builds an image and
+starts nothing.
 
+**1. Bring both containers up**, from the repository root:
+
+```bash
+xhost +
+cd docker
+docker compose -f compose_gpu.yml up --build -d   # compose.yml without a GPU
+```
+
+`--build` is what picks up changes under `ai_module/`. Two containers start:
+`iros2026_system` (simulator + autonomy stack) and `iros2026_ai_module` (this
+module).
+
+**2. Start the base autonomy system** — nothing moves without it:
+
+```bash
+docker exec -it iros2026_system bash
+/home/docker/autonomy_stack_mecanum_wheel_platform/system_simulation.sh
+```
+
+**3. Start this module**, in a second terminal:
+
+```bash
 docker exec -it iros2026_ai_module bash
-export ANTHROPIC_API_KEY=...          # supplied separately
+export ANTHROPIC_API_KEY=...          # supplied separately — see the note below
 ros2 launch dummy_vlm dummy_vlm.launch
 ```
 
-`docker/run.sh` forwards `ANTHROPIC_API_KEY` from the host shell.
+> [!IMPORTANT]
+> **The key has to be exported inside that shell.** The `ai_module` service in
+> `docker/compose*.yml` declares no `environment:` block, so nothing from the
+> host environment reaches the container — exporting `ANTHROPIC_API_KEY` on the
+> host before `docker compose up` does nothing. `docker exec` inherits the
+> container's environment, so the export above is what the launch actually
+> reads.
+>
+> To pass it from the host instead, add this to the `ai_module` service and
+> export the variable before `up`:
+>
+> ```yaml
+>     environment:
+>       - ANTHROPIC_API_KEY
+> ```
+>
+> That file is outside `ai_module/`, which the challenge README says is the
+> only folder a submission should change, so it is not edited here.
+
+**4. Send a question** (either container — they share the ROS graph):
+
+```bash
+ros2 topic pub --once /challenge_question std_msgs/msg/String \
+  "{data: 'Find the vase closest to the hookah'}"
+```
+
+### Standalone, without compose
+
+`ai_module/docker/` has its own pair for working on this module alone. They
+build and run `iros2026/ai_module:latest`, and `run.sh` forwards
+`ANTHROPIC_API_KEY` from the host shell, so no export inside the container is
+needed:
+
+```bash
+cd ai_module
+docker/build.sh
+export ANTHROPIC_API_KEY=...
+docker/run.sh          # or run_dev.sh, which bind-mounts vlm/ so edits to the
+                       # drive loop need no rebuild
+```
+
+Note these containers are unnamed, so `docker exec -it iros2026_ai_module` does
+**not** reach them — that name belongs to the compose service. `run.sh` drops
+you straight into the container instead.
 
 ### Check the plumbing without an API key
 
