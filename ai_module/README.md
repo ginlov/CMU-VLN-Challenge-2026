@@ -8,6 +8,15 @@ Every question type calls the Claude API, so `ANTHROPIC_API_KEY` is required —
 it is supplied with the submission, and is in neither this repository nor any
 image we publish.
 
+## Clone
+
+```bash
+git clone --recurse-submodules git@github.com:ginlov/CMU-VLN-Challenge-2026.git
+```
+
+`--recurse-submodules` matters — the base autonomy system is a submodule, and a
+plain `git clone` leaves it an empty directory.
+
 ## Steps
 
 **1. Build, with the key**, then start. Both commands, in this order — they
@@ -75,44 +84,17 @@ each type:
 
 ```bash
 # object reference -> Marker on /selected_object_marker
-timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
-  "{data: 'Find the vase between the cabinet and the stool.'}"
+ros2 topic pub --once /challenge_question std_msgs/msg/String \
+  "{data: 'Find the vase between the cabinet and the stool'}"
 
 # numerical -> Int32 on /numerical_response
-timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
+ros2 topic pub --once /challenge_question std_msgs/msg/String \
   "{data: 'How many photos are on the TV cabinet?'}"
 
 # instruction-following -> Pose2D stream on /way_point_with_heading
-timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
-  "{data: 'Take the path near the TV and go to the pillow farthest from the lamp.'}"
+ros2 topic pub --once /challenge_question std_msgs/msg/String \
+  "{data: ' First, go near the stool, then take the path near the cabinet, and stop at the bowl on the table'}"
 ```
-
-> [!IMPORTANT]
-> **Repeat the question, but stop repeating it.** Both halves matter, and
-> `--once` and an unbounded `--rate 1` fail in opposite directions.
->
-> *Repeat it,* because every subscriber here is volatile: a single `--once`
-> message published before the router has finished coming up is missed, and the
-> run waits forever for a question that already went by. Publishing at 1 Hz —
-> the rate the evaluation node itself uses — covers that startup window, and it
-> is the same window for all three question types. (Object reference used to
-> need repeating for a second, longer reason: the router `exec`s into
-> `scene_claude.launch`, and the fresh pipeline — which only finishes coming up
-> ~12 s later — had to re-catch the message off `/challenge_question` by then.
-> It no longer does. The router forwards the question it already received across
-> the exec in `XIAO_HEI_QUESTION`, and the pipeline primes its cache from that,
-> so a single message the router catches is now enough for object reference
-> too.)
->
-> *Stop repeating it,* because answering clears the de-duplication key
-> (`app/main.py`, `state["last_question_text"] = None`), so the next copy of
-> the same question starts a fresh answer. Evaluation is relaunched for every
-> question, so it never sees this; a publisher left running re-answers in a
-> loop instead of exploring.
->
-> `timeout 30` covers the handoff with margin: on our box the router
-> classifies in ~3 s, `scene_claude` is ready at ~12 s and exploration starts
-> at ~15 s.
 
 A question naming an object the loaded scene does not contain is not a useful
 test: the run fails on grounding rather than on anything the pipeline does.
