@@ -1,0 +1,37 @@
+<launch>
+
+  <!--
+    Team Xiao Hei AI module — entry point.
+
+    `ros2 launch dummy_vlm dummy_vlm.launch` — the command the evaluation
+    documents — reaches this file through the launch-only `dummy_vlm` shim
+    package next door.
+
+    Only one process starts here: the router. It waits for
+    /challenge_question, decides which of the three question types arrived,
+    and then either
+
+      instruction-following  -> drives the route itself (VLM grounding +
+                                lidar lift + waypoints), in this process;
+      numerical              -> answers in this process too;
+      object reference       -> hands the process over to one of two
+                                perception-backed pipelines, chosen by
+                                XIAO_HEI_REFERENCE_LAUNCH:
+                                  scene_gemini.launch  frontier sweep, then
+                                                       Gemini answers (default)
+                                  scene_claude.launch  nav_task1 drives at the
+                                                       named object, then
+                                                       Claude answers
+
+    One process at a time, by construction: the hand-off `exec`s. That matters
+    because the frontier explorer publishes waypoints from the moment it
+    starts, and two things steering /way_point_with_heading is not a race we
+    would win.
+
+    Configuration is by environment variable — ANTHROPIC_API_KEY (required),
+    XIAO_HEI_CLASSIFY, XIAO_HEI_BUDGET_S, XIAO_HEI_IMAGE_TOPIC. See
+    ai_module/README.md.
+  -->
+  <node pkg="vlm" exec="vlmNode" name="vlm" output="screen" />
+
+</launch>

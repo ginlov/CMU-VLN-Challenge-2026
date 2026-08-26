@@ -2,7 +2,6 @@
 
 Pick the responder with `XIAO_HEI_RESPONDER`:
 
-  - `dummy` (default) — the deterministic port of `dummyVLM.cpp`. No GPU.
   - `qwen`            — Qwen3.5 via vLLM. By default talks to a vLLM
                         HTTP sidecar (`XIAO_HEI_QWEN_VLLM_BASE_URL`).
                         Falls back to in-process vLLM when the URL is
@@ -38,7 +37,14 @@ from xiao_hei_vln.scene import SceneRepresentation
 from xiao_hei_vln.sync import LatestCache
 
 TICK_HZ = float(os.environ.get("XIAO_HEI_VLM_TICK_HZ", "2.0"))
-RESPONDER_NAME = os.environ.get("XIAO_HEI_RESPONDER", "dummy").lower()
+# `scene_claude` rather than a placeholder, and that is the point: the old
+# default was `dummy`, a deterministic stub that answers numerical questions
+# with a random integer and object reference from canned fixtures. It was
+# covered by three separate places setting XIAO_HEI_RESPONDER, so nothing
+# ever reached it — but a run that lost any one of them would have scored
+# plausible nonsense without raising anything. The stub is gone; an
+# unrecognised name now raises below rather than silently degrading.
+RESPONDER_NAME = os.environ.get("XIAO_HEI_RESPONDER", "scene_claude").lower()
 
 # Exploration phase — set XIAO_HEI_EXPLORATION_MAX_WAYPOINTS=0 to disable.
 # Exploration is NOT interrupted when a question arrives: it runs until the
@@ -56,10 +62,6 @@ def _build_responder(
     *,
     take_waypoint_reached_signals: Callable[[], int] | None = None,
 ):
-    if name == "dummy":
-        from xiao_hei_vln.dummy import DummyResponder
-
-        return DummyResponder(), None
     if name == "qwen":
         from dataclasses import asdict
 
@@ -288,7 +290,7 @@ def _build_responder(
         return responder, logger
     raise ValueError(
         f"Unknown XIAO_HEI_RESPONDER={name!r}; "
-        "expected one of: dummy, qwen, perception, scene_claude",
+        "expected one of: qwen, perception, scene_claude",
     )
 
 
@@ -444,7 +446,7 @@ def main() -> None:
         "qwen": "xiao_hei_qwen_vlm",
         "perception": "xiao_hei_perception_vlm",
         "scene_claude": "xiao_hei_scene_claude_vlm",
-    }.get(RESPONDER_NAME, "xiao_hei_dummy_vlm")
+    }.get(RESPONDER_NAME, "xiao_hei_vlm")
     node: Node = rclpy.create_node(node_name)
 
     cache = LatestCache()

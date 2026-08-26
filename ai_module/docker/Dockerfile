@@ -9,7 +9,7 @@
 # beyond the base is three lines, because the base already carries apt's
 # opencv 4.6 and scipy 1.11.
 #
-#   `ros2 launch dummy_vlm dummy_vlm.launch` starts the router, which reads
+#   `ros2 launch vlm vlm.launch` starts the router, which reads
 #   the question and picks the stack that answers it:
 #     instruction-following -> VLM grounding + lidar lift + waypoints (here)
 #     numerical             -> answered in that same process
@@ -92,6 +92,14 @@ ENV XIAO_HEI_VLM_DIR=/opt/xiao_hei/vlm
 #
 # Caveat for whoever touches this next: `pyproject.toml` is NOT re-read, so a
 # new dependency or entry point still needs a base-image rebuild.
+# Wipe first, because COPY overwrites but never deletes. Without this, a
+# module deleted from this repository lives on in the image for as long as the
+# base image carries it — `xiao_hei_vln/dummy`, `gemini` and `scene_gemini` all
+# outlived their removal that way, so `dummy` was still importable in an image
+# built from a tree that no longer had it. The package is a plain source tree
+# behind an editable install, so replacing it wholesale is safe and makes the
+# image match the repository exactly.
+RUN rm -rf /opt/xiao_hei_vln/src/xiao_hei_vln
 COPY xiao_hei_vln/src /opt/xiao_hei_vln/src
 
 # PYTHONPATH is deliberately NOT extended here, and that is load-bearing.
@@ -112,7 +120,7 @@ COPY xiao_hei_vln/src /opt/xiao_hei_vln/src
 
 # --- the responder the hand-off lands on -------------------------------------
 # NOT set in the base image, where `app/main.py` therefore resolves
-# `RESPONDER_NAME = os.environ.get("XIAO_HEI_RESPONDER", "dummy")` to **dummy** —
+# `RESPONDER_NAME = os.environ.get("XIAO_HEI_RESPONDER", "scene_claude")` —
 # the deterministic port of the C++ dummy node, which answers numerical
 # questions with a random integer and object-reference with canned fixtures.
 # a missing variable rather than a choice. Stated here so the hand-off lands on
@@ -121,15 +129,16 @@ COPY xiao_hei_vln/src /opt/xiao_hei_vln/src
 ENV XIAO_HEI_RESPONDER=scene_claude
 
 # --- the ament package -------------------------------------------------------
-# Nothing is compiled; colcon installs the two launch files and the `dummyVLM`
+# Nothing is compiled; colcon installs the launch files and the `vlmNode`
 # Python entry point under the names the evaluation expects.
+COPY src/vlm /home/docker/ai_module/src/vlm
 COPY src/dummy_vlm /home/docker/ai_module/src/dummy_vlm
 WORKDIR /home/docker/ai_module
 RUN /bin/bash -c "\
     source /opt/ros/jazzy/setup.bash && \
     colcon build \
       --cmake-args -DCMAKE_BUILD_TYPE=Release \
-      --packages-select dummy_vlm"
+      --packages-select vlm dummy_vlm"
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
@@ -140,9 +149,9 @@ ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 # user that actually runs, and the documented command
 #
 #     docker exec -it iros2026_ai_module bash
-#     ros2 launch dummy_vlm dummy_vlm.launch
+#     ros2 launch vlm vlm.launch
 #
-# failed with "Package 'dummy_vlm' not found". Switching back to `docker` would
+# failed with "Package 'vlm' not found". Switching back to `docker` would
 # be tidier but risks the sidecar's write access to /opt/perception (weights,
 # HF_HOME, TORCH_HOME are all under it), so the runtime user is left alone and
 # both home directories are covered.
@@ -153,7 +162,7 @@ RUN for rc in /home/docker/.bashrc /root/.bashrc; do \
 # ...and once more for shells that read neither .bashrc nor the entrypoint.
 # `.bashrc` opens with the stock `[ -z "$PS1" ] && return`, so it does nothing
 # for a *non-interactive* shell — and `docker exec <ctr> bash -c "ros2 launch
-# dummy_vlm dummy_vlm.launch"` is exactly that, and is a plausible shape for a
+# vlm vlm.launch"` is exactly that, and is a plausible shape for a
 # startup script we cannot see. BASH_ENV is the hook bash reads in that mode.
 # The guard keeps it cheap: sourcing an overlay once per subshell is fine,
 # doing it in every nested one bloats AMENT_PREFIX_PATH.

@@ -4,7 +4,7 @@
 #
 # The loop is a directory of plain files inside the image rather than an
 # installed package precisely so it can be changed without a rebuild: edit
-# ai_module/vlm/... on the host, re-run `ros2 launch dummy_vlm dummy_vlm.launch`
+# ai_module/vlm/... on the host, re-run `ros2 launch vlm vlm.launch`
 # in the container, and the change is live. A rebuild takes minutes and there
 # are ten of those in a question.
 #

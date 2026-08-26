@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The AI module: one question in, a driven trajectory out.
 
-This is what `ros2 launch dummy_vlm dummy_vlm.launch` starts. Two facts from
+This is what `ros2 launch vlm vlm.launch` starts. Two facts from
 the challenge README shape the whole file:
 
   "The system will be relaunched for each language command tested such that
@@ -19,7 +19,7 @@ wait, which we do not have.
 
 Debugging, from inside the container:
 
-    ros2 launch dummy_vlm dummy_vlm.launch                  # what the graders run
+    ros2 launch vlm vlm.launch                              # what the graders run
     python3 /opt/xiao_hei/vlm/challenge_node.py --selftest  # plumbing only, no API
     python3 /opt/xiao_hei/vlm/challenge_node.py --question "go to the ..."
 """
@@ -103,7 +103,7 @@ def wait_for_question(node, timeout: float) -> str | None:
 # editing to do it. Pointing it at a launch file that is not installed fails
 # loudly at exec, which is the correct outcome.
 REFERENCE_LAUNCH = os.environ.get("XIAO_HEI_REFERENCE_LAUNCH") or os.environ.get(
-    "XIAO_HEI_OTHER_LAUNCH", "dummy_vlm scene_claude.launch")
+    "XIAO_HEI_OTHER_LAUNCH", "vlm scene_claude.launch")
 
 
 def handle_numerical(node, bot: RobotNode, question: str) -> int:
