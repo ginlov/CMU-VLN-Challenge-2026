@@ -75,17 +75,27 @@ each type:
 
 ```bash
 # object reference -> Marker on /selected_object_marker
-ros2 topic pub --once /challenge_question std_msgs/msg/String \
+ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
   "{data: 'Find the vase between the cabinet and the stool.'}"
 
 # numerical -> Int32 on /numerical_response
-ros2 topic pub --once /challenge_question std_msgs/msg/String \
+ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
   "{data: 'How many photos are on the TV cabinet?'}"
 
 # instruction-following -> Pose2D stream on /way_point_with_heading
-ros2 topic pub --once /challenge_question std_msgs/msg/String \
+ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
   "{data: 'Take the path near the TV and go to the pillow farthest from the lamp.'}"
 ```
+
+> [!IMPORTANT]
+> **`--rate 1`, not `--once`.** The evaluation node repeats the question at
+> 1 Hz and this stack is built on that. An object-reference question makes the
+> router `exec` into `scene_claude.launch`, replacing its own process; the
+> pipeline that comes up subscribes to `/challenge_question` itself and a
+> single `--once` message is already gone. It then holds forever with nothing
+> to head for — perception keeps ticking, so the node looks healthy while no
+> waypoint is ever published and the robot never moves. Leave the publisher
+> running.
 
 A question naming an object the loaded scene does not contain is not a useful
 test: the run fails on grounding rather than on anything the pipeline does.
