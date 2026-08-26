@@ -75,27 +75,39 @@ each type:
 
 ```bash
 # object reference -> Marker on /selected_object_marker
-ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
+timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
   "{data: 'Find the vase between the cabinet and the stool.'}"
 
 # numerical -> Int32 on /numerical_response
-ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
+timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
   "{data: 'How many photos are on the TV cabinet?'}"
 
 # instruction-following -> Pose2D stream on /way_point_with_heading
-ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
+timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
   "{data: 'Take the path near the TV and go to the pillow farthest from the lamp.'}"
 ```
 
 > [!IMPORTANT]
-> **`--rate 1`, not `--once`.** The evaluation node repeats the question at
-> 1 Hz and this stack is built on that. An object-reference question makes the
-> router `exec` into `scene_claude.launch`, replacing its own process; the
-> pipeline that comes up subscribes to `/challenge_question` itself and a
-> single `--once` message is already gone. It then holds forever with nothing
-> to head for — perception keeps ticking, so the node looks healthy while no
-> waypoint is ever published and the robot never moves. Leave the publisher
-> running.
+> **Repeat the question, but stop repeating it.** Both halves matter, and
+> `--once` and an unbounded `--rate 1` fail in opposite directions.
+>
+> *Repeat it,* because an object-reference question makes the router `exec`
+> into `scene_claude.launch`, replacing its own process. The pipeline that
+> comes up subscribes to `/challenge_question` itself, by which time a single
+> `--once` message has been consumed by a process that no longer exists. It
+> then holds forever with nothing to head for — perception keeps ticking, so
+> the node looks healthy while no waypoint is published and the robot never
+> moves.
+>
+> *Stop repeating it,* because answering clears the de-duplication key
+> (`app/main.py`, `state["last_question_text"] = None`), so the next copy of
+> the same question starts a fresh answer. Evaluation is relaunched for every
+> question, so it never sees this; a publisher left running re-answers in a
+> loop instead of exploring.
+>
+> `timeout 30` covers the handoff with margin: on our box the router
+> classifies in ~3 s, `scene_claude` is ready at ~12 s and exploration starts
+> at ~15 s.
 
 A question naming an object the loaded scene does not contain is not a useful
 test: the run fails on grounding rather than on anything the pipeline does.
