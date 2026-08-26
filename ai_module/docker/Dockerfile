@@ -15,7 +15,7 @@
 #     numerical             -> answered in that same process
 #     object reference      -> question-directed nav + perception scene graph
 #                              + Claude (scene_claude.launch)
-FROM oel20/cmu-vln-ai-module:latest
+FROM oel20/cmu-vln-ai-module:submission-v3
 
 USER root
 

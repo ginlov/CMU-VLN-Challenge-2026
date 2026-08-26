@@ -2,7 +2,7 @@
 
 The challenge has three question categories; the response topic is
 determined by which category the question falls into. We start with the
-same keyword heuristic as the challenge template's C++ node and leave the
+same keyword heuristic as the reference `dummyVLM.cpp` and leave the
 classifier swappable for a learned model later.
 """
 
