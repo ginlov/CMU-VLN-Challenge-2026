@@ -129,8 +129,6 @@ def _build_responder(
         # clear min_inliers with genuine on-surface returns (env-tunable).
         scan_accum = ScanAccumulator(
             max_keyframes=int(os.environ.get("XIAO_HEI_SCAN_KEYFRAMES", "10")),
-            min_move_m=float(os.environ.get("XIAO_HEI_SCAN_MIN_MOVE_M", "0.25")),
-            min_rot_deg=float(os.environ.get("XIAO_HEI_SCAN_MIN_ROT_DEG", "15")),
             voxel_m=float(os.environ.get("XIAO_HEI_SCAN_VOXEL_M", "0.05")),
         )
         vocab = Vocabulary()
@@ -230,8 +228,6 @@ def _build_responder(
         lifter = PointLifter(min_inliers=min_inliers)
         scan_accum = ScanAccumulator(
             max_keyframes=int(os.environ.get("XIAO_HEI_SCAN_KEYFRAMES", "10")),
-            min_move_m=float(os.environ.get("XIAO_HEI_SCAN_MIN_MOVE_M", "0.25")),
-            min_rot_deg=float(os.environ.get("XIAO_HEI_SCAN_MIN_ROT_DEG", "15")),
             voxel_m=float(os.environ.get("XIAO_HEI_SCAN_VOXEL_M", "0.05")),
         )
         # Unlike `perception`, ObjectMap fusion is ON by default here. The
