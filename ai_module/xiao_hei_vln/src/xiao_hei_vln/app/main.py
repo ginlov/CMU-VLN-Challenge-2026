@@ -91,33 +91,30 @@ def _build_responder(
         )
         from xiao_hei_vln.perception.lifter import DEFAULT_MIN_INLIERS, PointLifter
         from xiao_hei_vln.perception.responder import (
-            DEFAULT_NEAR_THRESHOLD as PERCEPTION_NEAR_THRESHOLD,
-        )
-        from xiao_hei_vln.perception.responder import (
+            DEFAULT_NOVEL_VIEWPOINT_M,
+            DEFAULT_SAM_THRESHOLD,
             DEFAULT_SCORE_THRESHOLD,
         )
         from xiao_hei_vln.perception.scan_accumulator import ScanAccumulator
         from xiao_hei_vln.perception.vocab import Vocabulary
 
         base_url = os.environ.get("XIAO_HEI_PERCEPTION_BASE_URL", DEFAULT_BASE_URL)
-        near_t = float(os.environ.get(
-            "XIAO_HEI_PERCEPTION_NEAR_THRESHOLD",
-            str(PERCEPTION_NEAR_THRESHOLD),
-        ))
         score_t = float(os.environ.get(
             "XIAO_HEI_PERCEPTION_SCORE_THRESHOLD",
             str(DEFAULT_SCORE_THRESHOLD),
+        ))
+        sam_t = float(os.environ.get(
+            "XIAO_HEI_PERCEPTION_SAM_THRESHOLD",
+            str(DEFAULT_SAM_THRESHOLD),
+        ))
+        novel_m = float(os.environ.get(
+            "XIAO_HEI_NOVEL_VIEWPOINT_M",
+            str(DEFAULT_NOVEL_VIEWPOINT_M),
         ))
         min_inliers = int(os.environ.get(
             "XIAO_HEI_PERCEPTION_MIN_INLIERS",
             str(DEFAULT_MIN_INLIERS),
         ))
-        # Opt-in: fuse detections across frames with ObjectMap (converged 3D
-        # boxes + NMS + wall-sheet rejection) instead of per-detection
-        # add_object. Off by default → the pipeline behaves exactly as before.
-        use_object_map = os.environ.get("XIAO_HEI_OBJECT_MAP", "").lower() in (
-            "1", "true", "yes", "on",
-        )
         traj_str = os.environ.get("XIAO_HEI_TRAJECTORY_JSON", "")
         traj_path = Path(traj_str) if traj_str else None
 
@@ -138,10 +135,8 @@ def _build_responder(
         )
         vocab = Vocabulary()
 
-        object_map = None
-        if use_object_map:
-            from xiao_hei_vln.perception.object_map import ObjectMap
-            object_map = ObjectMap()
+        from xiao_hei_vln.perception.object_map import ObjectMap
+        object_map = ObjectMap()  # always on: validated pipeline fuses across frames
 
         logger = None
         log_dir = os.environ.get("XIAO_HEI_VLM_LOG_DIR", "")
@@ -150,10 +145,9 @@ def _build_responder(
                 log_dir,
                 config={
                     "perception_base_url": base_url,
-                    "near_threshold_m": near_t,
                     "score_threshold": score_t,
                     "min_inliers": min_inliers,
-                    "object_map": use_object_map,
+                    "object_map": True,
                     "trajectory_json": traj_str or None,
                 },
                 responder_name="perception",
@@ -164,8 +158,9 @@ def _build_responder(
             client=client,
             lifter=lifter,
             vocabulary=vocab,
-            near_threshold=near_t,
             score_threshold=score_t,
+            sam_threshold=sam_t,
+            novel_viewpoint_m=novel_m,
             trajectory_path=traj_path,
             take_waypoint_reached_signals=take_waypoint_reached_signals,
             logger=logger,
@@ -206,19 +201,23 @@ def _build_responder(
         from xiao_hei_vln.perception.lifter import DEFAULT_MIN_INLIERS, PointLifter
         from xiao_hei_vln.perception.object_map import ObjectMap
         from xiao_hei_vln.perception.responder import (
-            DEFAULT_NEAR_THRESHOLD as PERCEPTION_NEAR_THRESHOLD,
+            DEFAULT_NOVEL_VIEWPOINT_M,
+            DEFAULT_SAM_THRESHOLD,
+            DEFAULT_SCORE_THRESHOLD,
         )
-        from xiao_hei_vln.perception.responder import DEFAULT_SCORE_THRESHOLD
         from xiao_hei_vln.perception.scan_accumulator import ScanAccumulator
-        from xiao_hei_vln.perception.vocab import CROSS_SCENE_PRIOR, Vocabulary
+        from xiao_hei_vln.perception.vocab import Vocabulary
         from xiao_hei_vln.scene_claude import SceneClaudeResponder
 
         base_url = os.environ.get("XIAO_HEI_PERCEPTION_BASE_URL", DEFAULT_BASE_URL)
-        near_t = float(os.environ.get(
-            "XIAO_HEI_PERCEPTION_NEAR_THRESHOLD", str(PERCEPTION_NEAR_THRESHOLD),
-        ))
         score_t = float(os.environ.get(
             "XIAO_HEI_PERCEPTION_SCORE_THRESHOLD", str(DEFAULT_SCORE_THRESHOLD),
+        ))
+        sam_t = float(os.environ.get(
+            "XIAO_HEI_PERCEPTION_SAM_THRESHOLD", str(DEFAULT_SAM_THRESHOLD),
+        ))
+        novel_m = float(os.environ.get(
+            "XIAO_HEI_NOVEL_VIEWPOINT_M", str(DEFAULT_NOVEL_VIEWPOINT_M),
         ))
         min_inliers = int(os.environ.get(
             "XIAO_HEI_PERCEPTION_MIN_INLIERS", str(DEFAULT_MIN_INLIERS),
@@ -239,10 +238,7 @@ def _build_responder(
         # answer's `size` is read straight off the fused node's bbox, and a
         # per-detection box from one frame is not an extent — it is one view of
         # one. Opt out with XIAO_HEI_OBJECT_MAP=0.
-        use_object_map = os.environ.get("XIAO_HEI_OBJECT_MAP", "1").lower() not in (
-            "0", "false", "no", "off",
-        )
-        object_map = ObjectMap() if use_object_map else None
+        object_map = ObjectMap()  # always on (the fused bbox is the answer's size)
 
         perception = PerceptionResponder(
             scene,
@@ -251,9 +247,10 @@ def _build_responder(
             # The cross-scene prior, not the shared arabic-skewed default:
             # arrival is gated on the named class reaching the scene graph, and
             # an open-vocabulary detector finds nothing it was not asked for.
-            vocabulary=Vocabulary(prior=CROSS_SCENE_PRIOR),
-            near_threshold=near_t,
+            vocabulary=Vocabulary(),
             score_threshold=score_t,
+            sam_threshold=sam_t,
+            novel_viewpoint_m=novel_m,
             trajectory_path=traj_path,
             take_waypoint_reached_signals=take_waypoint_reached_signals,
             logger=None,                 # scene_claude owns all logging
@@ -276,10 +273,9 @@ def _build_responder(
                 config={
                     **safe_cfg,
                     "perception_base_url": base_url,
-                    "near_threshold_m": near_t,
                     "score_threshold": score_t,
                     "min_inliers": min_inliers,
-                    "object_map": use_object_map,
+                    "object_map": True,
                 },
                 responder_name="scene_claude",
                 tick_hz=TICK_HZ,
