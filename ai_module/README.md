@@ -27,6 +27,15 @@ docker compose -f compose_gpu.yml up -d
 On a machine without an NVIDIA GPU, use `compose.yml` in place of
 `compose_gpu.yml` in **both** commands.
 
+> [!NOTE]
+> **Over SSH, `export DISPLAY=:0` before `up`.** The compose file forwards the
+> host shell's `DISPLAY` into the containers, and an SSH session usually has
+> none, so the containers are created with it empty and the simulator's RViz
+> dies on `qt.qpa.xcb: could not connect to display` while the Unity window
+> never renders. `DISPLAY` is read at `up`, not at `exec`, so a container
+> created without it stays broken until it is recreated. A desktop terminal
+> already has `DISPLAY` set and needs nothing.
+
 The key is now part of the image, so it is there for every `up`, `restart` and
 `run` — including the relaunch between questions — and no launch needs an
 export in front of it. It has to go in here because the `ai_module` service
