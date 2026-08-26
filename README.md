@@ -73,7 +73,7 @@ Examples:
 First, clone this repo and place it under your local folder.
 
 ```
-git clone --recurse-submodules git@github.com:Yuxin916/CMU-VLN-Challenge-2026.git
+git clone --recurse-submodules git@github.com:ginlov/CMU-VLN-Challenge-2026.git
 ```
 
 ### Challenge Scenes
