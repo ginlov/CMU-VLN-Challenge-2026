@@ -8,6 +8,16 @@ Every question type calls the Claude API, so `ANTHROPIC_API_KEY` is required —
 it is supplied with the submission, and is in neither this repository nor any
 image we publish.
 
+> [!NOTE]
+> **The published base image is pinned, and public.** `docker/Dockerfile`
+> builds on `oel20/cmu-vln-ai-module:submission-v3` — the exact perception
+> stack, model weights and runtime we validated. For transparency, anyone can
+> pull and inspect it directly:
+>
+> ```bash
+> docker pull oel20/cmu-vln-ai-module:submission-v3
+> ```
+
 ## Steps
 
 **1. Build, with the key**, then start. Both commands, in this order — they
