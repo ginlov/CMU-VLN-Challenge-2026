@@ -60,8 +60,10 @@ class PerceptionPipeline:
     """Model orchestrator. Construct once at server startup."""
 
     YOLO_WEIGHTS = "/opt/perception/models/yolov8x-worldv2.pt"
-    SAM_WEIGHTS = "/opt/perception/models/sam2.1_hiera_tiny.pt"
-    SAM_CONFIG = "configs/sam2.1/sam2.1_hiera_t.yaml"
+    # SAM 2.1 Hiera-Large — the segmenter the validated system uses (the earlier
+    # Hiera-Tiny traded mask quality for speed). Weight + config must match.
+    SAM_WEIGHTS = "/opt/perception/models/sam2.1_hiera_large.pt"
+    SAM_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
     def __init__(self, *, device: str | None = None) -> None:
         import torch

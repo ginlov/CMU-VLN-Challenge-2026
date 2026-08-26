@@ -59,14 +59,15 @@ COPY perception/server.py perception/pipeline.py perception/geometry.py percepti
      /opt/perception/
 # Model weights, all fetched at build time so they are baked into the image
 # (kept out of git — the 338 MB CLIP blob would need LFS otherwise):
-#   - YOLO-World v2 (open-vocab detector) + SAM 2.1 Hiera Tiny (segmenter)
+#   - YOLO-World v2 (open-vocab detector) + SAM 2.1 Hiera Large (segmenter,
+#     the checkpoint the validated system uses; pipeline.py must match)
 #   - OpenAI CLIP ViT-B/32 — the text encoder YOLO-World v2 loads. Placed where
 #     Ultralytics' loader looks so it never hits the network at runtime. The
 #     sha256 we verify is also the upstream URL path (content-addressed).
 RUN curl -fsSL -o /opt/perception/models/yolov8x-worldv2.pt \
         https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8x-worldv2.pt \
- && curl -fsSL -o /opt/perception/models/sam2.1_hiera_tiny.pt \
-        https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt \
+ && curl -fsSL -o /opt/perception/models/sam2.1_hiera_large.pt \
+        https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt \
  && CLIP_SHA=40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af \
  && curl -fSL --retry 3 -o /ultralytics/weights/clip/ViT-B-32.pt \
         "https://openaipublic.azureedge.net/clip/models/${CLIP_SHA}/ViT-B-32.pt" \

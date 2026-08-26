@@ -33,6 +33,7 @@ from xiao_hei_vln.messages.question import QuestionType
 from xiao_hei_vln.perception.client import HTTPPerceptionClient
 from xiao_hei_vln.perception.lifter import PointLifter
 from xiao_hei_vln.perception.scan_accumulator import ScanAccumulator
+from xiao_hei_vln.perception.size_prior import size_for
 from xiao_hei_vln.perception.vocab import Vocabulary
 from xiao_hei_vln.scene import ObjectObservation
 
@@ -47,9 +48,46 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-DEFAULT_NEAR_THRESHOLD = 2.0       # m — "near" relation threshold
-DEFAULT_SCORE_THRESHOLD = 0.25
+# 0.25 was set when the class prior held 28 labels. It now holds 110, so the
+# detector scores four times as many phrases against every region and the weak
+# tail is mostly labels that never fire confidently at all — `photo` lands
+# below 0.35 in 98% of its detections. Swept offline over 3 recorded scenes,
+# 0.35 cut the object count by a third and the counting error by 26% while
+# recall and mAP held (0.463 -> 0.459, 0.316 -> 0.325).
+#
+# Was raised to 0.6 to keep low-confidence fragments out of the sidecar's
+# face-seam merge (a 0.9 detection could otherwise be unioned with a 0.3
+# fragment) — but a per-class confidence audit (TASK 34) showed 0.6 silently
+# drops real objects whose YOLO score peaks below it (door 0.52, table 0.60,
+# door frame 0.59), while noise-floor classes never clear it anyway. Lowered to
+# 0.4 and paired with the SAM mask-quality gate below, which removes the weak
+# masks the lower floor lets in. Net effect measured on arabic_room: see
+# DEFAULT_SAM_THRESHOLD. Override with XIAO_HEI_PERCEPTION_SCORE_THRESHOLD.
+DEFAULT_SCORE_THRESHOLD = 0.4
 DEFAULT_IOU_THRESHOLD = 0.5
+# SAM mask-quality gate (B5). Detections whose SAM confidence is below this are
+# dropped before lifting. Pairs with the lowered 0.4 score floor: 0.4 alone adds
+# recall but also weak/bleeding masks, and the SAM gate keeps the extra
+# detections clean. Measured on arabic_room (gate on 0.3 m, live sidecar):
+# 0.4 + SAM 0.8 vs the old 0.6 raised mAP@1.0 0.235 -> 0.337 (+43%), recall
+# 0.235 -> 0.383, IoU@0.25 0.091 -> 0.134, at a precision cost (0.79 -> 0.62).
+# Override with XIAO_HEI_PERCEPTION_SAM_THRESHOLD (0.0 = off).
+DEFAULT_SAM_THRESHOLD = 0.8
+# Capture-time viewpoint-novelty gate (TASK 33). Perception (detect -> lift ->
+# fuse) runs only when the robot has moved farther than this from every
+# previously perceived viewpoint; the scan accumulator still ingests every tick.
+# A 360 panorama makes frame content position-only, so novelty is pure
+# translation. Stops a dwelling robot from flooding a node with redundant
+# partial views (which shrinks + biases its box).
+#
+# DEFAULT 0.3 m (ON). Measured offline on arabic_room (TASK 33, flat estimator
+# on): a 0.3 m gate cuts perceived frames 397 -> 36 (~11x less compute) and
+# raises box IoU@0.25 (0.051 -> 0.091). It costs some centre-distance mAP@0.5
+# (0.221 -> 0.199) because a few objects only cleared the score/inlier gates from
+# a now-skipped closer pose, but on the live robot the accumulator still ingests
+# LiDAR every tick (so the cloud stays dense) and the compute headroom + box
+# quality win the tradeoff. Override with XIAO_HEI_NOVEL_VIEWPOINT_M (0.0 = off).
+DEFAULT_NOVEL_VIEWPOINT_M = 0.3
 
 
 class PerceptionResponder:
@@ -62,14 +100,16 @@ class PerceptionResponder:
         client: HTTPPerceptionClient,
         lifter: PointLifter,
         vocabulary: Vocabulary,
-        near_threshold: float = DEFAULT_NEAR_THRESHOLD,
         trajectory_path: Path | None = None,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         iou_threshold: float = DEFAULT_IOU_THRESHOLD,
+        sam_threshold: float = DEFAULT_SAM_THRESHOLD,
+        novel_viewpoint_m: float = DEFAULT_NOVEL_VIEWPOINT_M,
         take_waypoint_reached_signals: Callable[[], int] | None = None,
         logger: VLMLogger | None = None,
-        object_map: ObjectMap | None = None,
-        scan_accumulator: ScanAccumulator | None = None,
+        object_map: ObjectMap,
+        scan_accumulator: ScanAccumulator,
+        class_thresholds: dict[str, float] | None = None,
     ) -> None:
         """
         Args:
@@ -80,8 +120,6 @@ class PerceptionResponder:
                 pushes the current question's vocabulary to the sidecar
                 via :meth:`HTTPPerceptionClient.set_classes` whenever
                 the set changes.
-            near_threshold: XY radius (m) for the on-demand
-                ``derive_near_relations`` call at answer time.
             trajectory_path: optional Task 7 coverage-trajectory JSON.
                 Walked during Phase A. Without it, the responder
                 answers from tick 0 with no movement.
@@ -101,30 +139,36 @@ class PerceptionResponder:
                 ``trajectory_path``, but Phase A unit tests must
                 inject a stateful counter.
             logger: optional VLMLogger; receives per-tick records.
-            object_map: optional :class:`ObjectMap`. When supplied, each
-                detection's lifted LiDAR cloud is fused here (cross-frame
-                point-cloud union → converged 3D box, NMS, wall-sheet
-                rejection) and the fused snapshot is synced into ``scene``
-                every tick via ``sync_from_object_map`` — instead of the
-                per-detection ``scene.add_object`` path. ``None`` keeps the
-                historical add_object behaviour.
-            scan_accumulator: optional :class:`ScanAccumulator`. Densifies
+            object_map: the :class:`ObjectMap` every detection's lifted
+                LiDAR cloud is fused into (cross-frame point-cloud union →
+                converged 3D box, NMS, wall-sheet rejection). The fused
+                snapshot is synced into ``scene`` every tick via
+                ``sync_from_object_map``.
+            scan_accumulator: the :class:`ScanAccumulator` that densifies
                 the per-tick registered scan with a rolling window of
                 keyframes before lifting, so small objects clear the
                 lifter's ``min_inliers`` gate with genuine on-surface
-                returns. Defaults to a standard accumulator; the buffer
-                persists across questions (the physical scene is the same
-                for the whole session).
+                returns. The buffer persists across questions (the physical
+                scene is the same for the whole session).
         """
         self._scene = scene
         self._client = client
         self._lifter = lifter
         self._object_map = object_map
-        self._scan_accum = scan_accumulator or ScanAccumulator()
+        self._scan_accum = scan_accumulator
         self._vocab = vocabulary
-        self._near_threshold = float(near_threshold)
         self._score_threshold = float(score_threshold)
         self._iou_threshold = float(iou_threshold)
+        self._sam_threshold = float(sam_threshold)
+        # Shared per-class threshold overrides (VLM verify-recall). None/empty =
+        # the normal single-threshold behaviour.
+        self._class_thresholds = class_thresholds if class_thresholds is not None else {}
+        # Viewpoint-novelty gate state: xy of every viewpoint we have actually
+        # perceived from. A new tick perceives only if it is farther than
+        # `_novel_viewpoint_m` from ALL of these (nearest-neighbour over all
+        # kept, so a revisit/loop does not re-admit an already-covered pose).
+        self._novel_viewpoint_m = float(novel_viewpoint_m)
+        self._kept_xy: list[tuple[float, float]] = []
 
         self._waypoints: list[Waypoint] = (
             _load_waypoints(trajectory_path) if trajectory_path is not None else []
@@ -180,7 +224,7 @@ class PerceptionResponder:
     def ingest(self, snapshot: VLMInput) -> None:
         """Build the scene from this frame *without* answering.
 
-        Runs only the detect → lift → add_object cycle. The exploration
+        Runs only the detect → lift → fuse cycle. The exploration
         phase calls this every tick so the scene graph keeps growing while
         the explorer drives movement — importantly, it does **not** emit an
         answer even when a question is already active, so a question that
@@ -244,9 +288,7 @@ class PerceptionResponder:
                 ),
             )
 
-        # Phase B — answer from the live scene graph. Derive ``near``
-        # edges now so the logged snapshot has them at answer time.
-        self._scene.derive_near_relations(self._near_threshold)
+        # Phase B — answer from the live scene graph.
         if qtype is QuestionType.NUMERICAL:
             ans = self._answer_numerical(snapshot.question.text)
         elif qtype is QuestionType.OBJECT_REFERENCE:
@@ -258,11 +300,23 @@ class PerceptionResponder:
         return ans
 
     # ------------------------------------------------------------------
-    # Scene maintenance — detect → lift → add_object
+    # Scene maintenance — detect → lift → fuse
     # ------------------------------------------------------------------
 
+    def _viewpoint_is_novel(self, position) -> bool:
+        """True when ``position`` is farther than ``_novel_viewpoint_m`` from
+        every viewpoint we have already perceived from (nearest-neighbour over
+        all kept). ``<= 0`` disables the gate — always novel."""
+        if self._novel_viewpoint_m <= 0.0 or not self._kept_xy:
+            return True
+        px, py = float(position.x), float(position.y)
+        nearest = min(
+            math.hypot(px - kx, py - ky) for kx, ky in self._kept_xy
+        )
+        return nearest > self._novel_viewpoint_m
+
     def _inject_visible(self, snapshot: VLMInput) -> None:
-        """Run a detect → lift → add_object cycle for this tick.
+        """Run a detect → lift → fuse cycle for this tick.
 
         Silently skipped when the snapshot lacks the inputs the
         pipeline needs (no image, no pose, no scan). Empties from the
@@ -272,11 +326,48 @@ class PerceptionResponder:
         if snapshot.image is None or snapshot.pose is None or snapshot.registered_scan is None:
             return
 
+        # Project with the pose as it was when this *image* was captured, not
+        # the newest one. The camera lags the 200 Hz odometry, so the two
+        # differ by however far the robot moved in between — and that offset
+        # lands directly on every lifted point. Falls back to the current pose
+        # when no interpolated one is available (no pose history yet, or a
+        # caller that builds VLMInput by hand).
+        lift_pose = snapshot.image_pose or snapshot.pose
+
+        # Optionally densify the sweep with a rolling window of keyframes.
+        # Off by default: measured on two scenes, accumulation costs more than
+        # it gives once the lifter clusters by depth — it mixes returns from
+        # viewpoints metres apart into one cloud, which inflates every box
+        # (livingroom_3 size error 2.28x accumulated vs 1.28x from the single
+        # sweep; chinese_room 1.52x vs 0.87x) and drops precision.
+        #
+        # This runs EVERY tick — including ticks the novelty gate skips
+        # perception on — so the cloud stays dense/registered regardless of
+        # whether we detect this frame (TASK 33).
+        scan_points = (
+            self._scan_accum.update(
+                snapshot.registered_scan.points,
+                lift_pose.position,
+                lift_pose.orientation,
+            )
+            if self._scan_accum is not None
+            else snapshot.registered_scan.points
+        )
+
         classes = self._vocab.current_classes(
             snapshot.question.text if snapshot.question is not None else None,
         )
         if not classes:
             return
+
+        # Viewpoint-novelty gate: skip the expensive detect → lift → fuse when
+        # the robot has not moved far enough from every viewpoint already
+        # perceived. A dwelling robot otherwise floods a node with redundant
+        # near-identical partial views, shrinking and biasing its box (TASK 33).
+        if not self._viewpoint_is_novel(lift_pose.position):
+            return
+        self._kept_xy.append((float(lift_pose.position.x), float(lift_pose.position.y)))
+
         # set_classes() is dedup-cached; only fires a network call when
         # the list actually changes.
         self._client.set_classes(classes)
@@ -287,55 +378,54 @@ class PerceptionResponder:
             log.exception("failed to decode image frame; skipping tick")
             return
 
+        # Per-class threshold overrides (VLM-requested "verify" recall boost):
+        # detect at the LOWEST active floor so low-confidence candidates for a
+        # relaxed class come back, then re-apply the threshold per class — every
+        # class the model has not relaxed keeps the normal floor, so global
+        # precision is unchanged. With no overrides this is exactly the old path.
+        detect_floor = self._score_threshold
+        if self._class_thresholds:
+            detect_floor = min(detect_floor, min(self._class_thresholds.values()))
         detections = self._client.detect(
             bgr,
             classes=None,                # rely on the cached set
-            score_threshold=self._score_threshold,
+            score_threshold=detect_floor,
             iou_threshold=self._iou_threshold,
         )
+        if detect_floor < self._score_threshold:
+            detections = [
+                d for d in detections
+                if d.score >= self._class_thresholds.get(
+                    d.label.strip().lower(), self._score_threshold
+                )
+            ]
+        if self._sam_threshold > 0.0:                # B5 mask-quality gate
+            detections = [d for d in detections
+                          if d.sam_score >= self._sam_threshold]
         if not detections:
             return
-
-        # Densify the sparse single sweep with a rolling window of
-        # keyframes (map-frame, so directly concatenable) before lifting —
-        # a lone sweep leaves small objects below the lifter's min_inliers
-        # gate. Returns the same cloud on near-stationary ticks.
-        scan_points = self._scan_accum.update(
-            snapshot.registered_scan.points,
-            snapshot.pose.position,
-            snapshot.pose.orientation,
-        )
+        # The pose here is already matched to the image's stamp by LatestCache
+        # (TASK 27), so it is the pose the camera had when the frame was taken —
+        # no per-lift time-skew correction is needed.
         for det in detections:
             result = self._lifter.lift(
                 mask=det.mask,
                 scan_points_map=scan_points,
-                pose_position=snapshot.pose.position,
-                pose_orientation=snapshot.pose.orientation,
+                pose_position=lift_pose.position,
+                pose_orientation=lift_pose.orientation,
             )
             if result.position is None:
                 continue
             color_rgb, color_name = _mask_color(bgr, det.mask)
-            if self._object_map is not None:
-                # Fuse this detection's lifted cloud across frames; the scene
-                # object layer is rebuilt from the fused snapshot below.
-                self._object_map.add(
-                    det.label, det.score, result.inlier_points,
-                    color_rgb, color_name,
-                )
-                continue
-            self._scene.add_object(ObjectObservation(
-                label=det.label,
-                position=result.position,
-                confidence=det.score,
-                color_rgb=color_rgb,      # median RGB of the masked pixels
-                color_name=color_name,    # nearest basic-colour label
-                bbox_min=None,            # AABB from a 2D mask isn't a 3D bbox;
-                bbox_max=None,            # leave None until we estimate it.
-            ))
+            # Fuse this detection's lifted cloud across frames; the scene
+            # object layer is rebuilt from the fused snapshot below.
+            self._object_map.add(
+                det.label, det.score, result.inlier_points,
+                color_rgb, color_name,
+            )
 
-        if self._object_map is not None:
-            # One fused snapshot → scene objects (with real 3D boxes) per tick.
-            self._scene.sync_from_object_map(self._object_map.export())
+        # One fused snapshot → scene objects (with real 3D boxes) per tick.
+        self._scene.sync_from_object_map(self._object_map.export())
 
     # ------------------------------------------------------------------
     # Question handlers — read from the live scene graph
@@ -440,23 +530,34 @@ def _xy_dist(a: Vector3, b: Vector3) -> float:
 
 
 def _size_from_obs(obs: ObjectObservation) -> Vector3:
-    """Derive a (size_x, size_y, size_z) from the observation's 3D AABB.
+    """Best available (size_x, size_y, size_z) for a detected object.
 
-    Returns a zero-vector when no bbox is available — that's the
-    typical case for the perception path today (we'd need to also
-    project the mask through the LiDAR scan and fit a 3D extent,
-    which is a Phase 4 tuning item).
+    The measured box wins whenever we have one. That is not obvious — a
+    partial LiDAR view only covers the faces we saw — but it is what the
+    numbers say: once the box comes from gated percentiles rather than raw
+    min/max, its median error against ground truth is 1.27x, and per-instance
+    measurement beats a class median (mean IoU 0.150 measured vs 0.109 with
+    the prior, on the livingroom_3 corpus). The prior was a good idea when
+    boxes were 6.8x oversized; it is a regression now.
+
+    The class prior (:mod:`xiao_hei_vln.perception.size_prior`) stays as the
+    fallback for detections that never got a box at all — the alternative
+    there is a zero-volume box, which scores exactly nothing.
     """
-    if obs.bbox_min is None or obs.bbox_max is None:
-        return Vector3(x=0.0, y=0.0, z=0.0)
-    return Vector3(
-        x=abs(obs.bbox_max.x - obs.bbox_min.x),
-        y=abs(obs.bbox_max.y - obs.bbox_min.y),
-        z=abs(obs.bbox_max.z - obs.bbox_min.z),
-    )
+    if obs.bbox_min is not None and obs.bbox_max is not None:
+        return Vector3(
+            x=abs(obs.bbox_max.x - obs.bbox_min.x),
+            y=abs(obs.bbox_max.y - obs.bbox_min.y),
+            z=abs(obs.bbox_max.z - obs.bbox_min.z),
+        )
+
+    prior = size_for(obs.label)
+    if prior is not None:
+        return Vector3(x=prior[0], y=prior[1], z=prior[2])
+    return Vector3(x=0.0, y=0.0, z=0.0)
 
 
-def _image_frame_to_bgr(image_frame) -> "np.ndarray":  # type: ignore[name-defined]
+def _image_frame_to_bgr(image_frame) -> np.ndarray:  # type: ignore[name-defined]
     """Convert an :class:`ImageFrame` into a ``(H, W, 3)`` BGR ndarray.
 
     The image arrives as raw bytes in ``bgr8`` encoding (per the
@@ -495,8 +596,8 @@ _COLOR_ANCHORS: tuple[tuple[str, tuple[int, int, int]], ...] = (
 
 
 def _mask_color(
-    bgr: "np.ndarray",  # type: ignore[name-defined]
-    mask: "np.ndarray",  # type: ignore[name-defined]
+    bgr: np.ndarray,  # type: ignore[name-defined]
+    mask: np.ndarray,  # type: ignore[name-defined]
 ) -> tuple[tuple[int, int, int] | None, str | None]:
     """Return ``((r, g, b), name)`` for the pixels under ``mask``.
 

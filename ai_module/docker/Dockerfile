@@ -102,6 +102,19 @@ ENV XIAO_HEI_VLM_DIR=/opt/xiao_hei/vlm
 RUN rm -rf /opt/xiao_hei_vln/src/xiao_hei_vln
 COPY xiao_hei_vln/src /opt/xiao_hei_vln/src
 
+# --- perception: use the validated SAM 2.1 Hiera-Large -----------------------
+# The base image bakes in SAM Hiera-Tiny (Dockerfile.full) and its perception
+# source at /opt/perception, and the base override above does NOT copy
+# perception/ — so, exactly like the xiao_hei_vln case, editing
+# ai_module/perception/ would be silently inert on THIS build. Fetch the Large
+# weight into the models dir the base already provisioned, then overwrite the
+# sidecar source so pipeline.py loads it. The Tiny weight is left in place
+# (harmless; it sits in a base layer that a delete here would not reclaim).
+RUN curl -fsSL -o /opt/perception/models/sam2.1_hiera_large.pt \
+        https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt
+COPY perception/server.py perception/pipeline.py perception/geometry.py perception/__init__.py \
+     /opt/perception/
+
 # PYTHONPATH is deliberately NOT extended here, and that is load-bearing.
 #
 # Both halves of this module ship a package called `xiao_hei_vln`, and they are
