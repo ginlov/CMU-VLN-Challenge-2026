@@ -10,15 +10,22 @@ image we publish.
 
 ## Steps
 
-**1. Build, with the key**, from the repository root. Two commands rather than
-`up --build`, because `up` takes no `--build-arg`:
+**1. Build, with the key**, then start. Both commands, in this order — they
+are one step split in two because `up --build` takes no `--build-arg`:
 
 ```bash
 xhost +
 cd docker
+
+# builds the image with the key baked into it
 docker compose -f compose_gpu.yml build --build-arg ANTHROPIC_API_KEY=<the key>
-docker compose -f compose_gpu.yml up -d          # compose.yml without a GPU
+
+# starts iros2026_system and iros2026_ai_module
+docker compose -f compose_gpu.yml up -d
 ```
+
+On a machine without an NVIDIA GPU, use `compose.yml` in place of
+`compose_gpu.yml` in **both** commands.
 
 The key is now part of the image, so it is there for every `up`, `restart` and
 `run` — including the relaunch between questions — and no launch needs an
