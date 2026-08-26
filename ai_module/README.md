@@ -68,12 +68,29 @@ ros2 launch dummy_vlm dummy_vlm.launch
 Without a key it logs the reason and exits here, rather than driving somewhere
 first.
 
-**4. Send a question** — either container, they share the ROS graph:
+**4. Send a question**, from a third terminal — either container, they share
+the ROS graph. The simulator ships one scene at a time, and the base image's
+is `livingroom_3`, so these are its own questions from `questions/`, one of
+each type:
 
 ```bash
+# object reference -> Marker on /selected_object_marker
 ros2 topic pub --once /challenge_question std_msgs/msg/String \
-  "{data: 'Find the vase closest to the hookah'}"
+  "{data: 'Find the vase between the cabinet and the stool.'}"
+
+# numerical -> Int32 on /numerical_response
+ros2 topic pub --once /challenge_question std_msgs/msg/String \
+  "{data: 'How many photos are on the TV cabinet?'}"
+
+# instruction-following -> Pose2D stream on /way_point_with_heading
+ros2 topic pub --once /challenge_question std_msgs/msg/String \
+  "{data: 'Take the path near the TV and go to the pillow farthest from the lamp.'}"
 ```
+
+A question naming an object the loaded scene does not contain is not a useful
+test: the run fails on grounding rather than on anything the pipeline does.
+`mesh/unity/object_list.txt` inside the system container lists what is actually
+there.
 
 ## Layout
 
