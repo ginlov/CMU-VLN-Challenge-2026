@@ -1,0 +1,33 @@
+<package format="3">
+  <name>vlm</name>
+  <version>0.1.0</version>
+  <description>
+    Team Xiao Hei AI module. Starts a router that reads the question and
+    picks the stack that answers it: instruction-following is driven in
+    process (VLM grounding + lidar lift + waypoints); numerical is answered
+    there too; object reference hands over to scene_claude.launch
+    (question-directed navigation + perception scene graph + Claude).
+
+    The `dummy_vlm` package beside this one is a launch-only shim that
+    forwards to this package, so the evaluation's documented
+    `ros2 launch dummy_vlm dummy_vlm.launch` keeps working.
+  </description>
+  <maintainer email="longgiang2015bn@gmail.com">Team Xiao Hei</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- The responder itself is a pip-installed Python package (xiao_hei_vln)
+       launched as an executable; these are the ROS interfaces it uses. -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

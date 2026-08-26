@@ -1,6 +1,6 @@
 """``PerceptionResponder`` — Phase A frontier-exploration responder.
 
-API mirrors :class:`xiao_hei_vln.dummy.responder.DummyResponder` so the
+API matches the responder protocol (respond / ingest / is_done / reset) so the
 main loop in ``app/main.py`` can swap it in with a one-line change:
 
 * ``respond(snapshot) -> VLMOutput | None`` — called each tick.

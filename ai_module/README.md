@@ -1,6 +1,6 @@
 # AI module — Team Xiao Hei
 
-`dummy_vlm.launch` starts a router that reads `/challenge_question` and picks
+`vlm.launch` starts a router that reads `/challenge_question` and picks
 the stack that answers it: instruction-following and numerical are answered in
 that process; object reference `exec`s `scene_claude.launch`, which brings up
 the perception sidecar (YOLO-World v2 + SAM 2.1) and answers with Claude.
@@ -62,7 +62,7 @@ docker exec -it iros2026_system bash
 
 ```bash
 docker exec -it iros2026_ai_module bash
-ros2 launch dummy_vlm dummy_vlm.launch
+ros2 launch vlm vlm.launch
 ```
 
 Without a key it logs the reason and exits here, rather than driving somewhere
@@ -123,11 +123,13 @@ ai_module/
 │   ├── Dockerfile.full   from-source recipe for that base
 │   ├── run.sh            standalone run, forwards ANTHROPIC_API_KEY
 │   └── run_dev.sh        bind-mounts vlm/ so edits need no rebuild
-├── src/dummy_vlm/        launch + entry point, names kept from the template
-│   ├── src/dummyVLM.py   installed as `dummyVLM` — the router
+├── src/vlm/              launch + entry point
+│   ├── src/vlmNode.py    installed as `vlmNode` — the router
 │   └── launch/
-│       ├── dummy_vlm.launch     starts the router
+│       ├── vlm.launch           starts the router
 │       └── scene_claude.launch  object reference via nav_task1 + Claude
+├── src/dummy_vlm/        launch-only shim; forwards to vlm so the command
+│                         in docker/README.md keeps working
 ├── vlm/                  instruction-following, at /opt/xiao_hei/vlm
 │   ├── challenge_node.py question in, driven trajectory out
 │   ├── robot_node.py     ROS I/O: one frame of everything, or one waypoint

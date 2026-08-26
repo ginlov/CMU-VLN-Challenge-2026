@@ -2,28 +2,21 @@
   <name>dummy_vlm</name>
   <version>0.1.0</version>
   <description>
-    Team Xiao Hei AI module launcher. The package name and launch file
-    (dummy_vlm.launch) are kept from the challenge template so the
-    evaluation's `ros2 launch dummy_vlm dummy_vlm.launch` invocation still
-    works. It now starts a router that reads the question and picks the stack
-    that answers it: instruction-following is driven in process (VLM grounding
-    + lidar lift + waypoints); numerical and object-reference hand over to
-    scene_claude.launch (question-directed navigation + perception scene
-    graph + Claude), which answers object reference.
+    Launch-only compatibility shim. The module itself is the `vlm` package
+    next door; this one exists so that `ros2 launch dummy_vlm
+    dummy_vlm.launch` — the command the challenge's own docker/README.md
+    documents, in a file outside ai_module/ that a submission may not edit —
+    still starts it. There is no code here, only a launch file that includes
+    `vlm`'s.
+
+    Delete this package only once nothing outside ai_module/ names it.
   </description>
   <maintainer email="longgiang2015bn@gmail.com">Team Xiao Hei</maintainer>
   <license>BSD</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- The responder itself is a pip-installed Python package (xiao_hei_vln)
-       launched as an executable; these are the ROS interfaces it uses. -->
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>std_msgs</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>vlm</exec_depend>
   <exec_depend>ros2launch</exec_depend>
 
   <export>

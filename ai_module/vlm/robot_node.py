@@ -223,7 +223,7 @@ class RobotNode:
         `/joy` is the one that bites: without a heartbeat the local planner
         silently discards every waypoint, and the only symptom is a robot that
         never moves. A rival publisher on `/way_point_with_heading` is the
-        other — the C++ `dummyVLM` will fight us for control if it was left
+        other — the template's C++ node will fight us for control if it was left
         running. Reported, never fatal: a missing count here is often just
         discovery not having settled, and refusing to start the question over
         that would forfeit it outright.

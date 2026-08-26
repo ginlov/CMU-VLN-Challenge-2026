@@ -6,7 +6,7 @@ Challenge 2026](https://www.ai-meets-autonomy.com/cmu-vln-challenge).
 **[Documentation](https://ginlov.github.io/xiao-hei-vln-cmu/)**
 
 The repo provides a typed Python contract between the challenge's
-ROS 2 sensors and a VLM, a dummy VLM that satisfies the contract end-to-end,
+ROS 2 sensors and a VLM,
 and a docker image that drops straight into the official challenge
 compose stack. **A real VLM plugs in by changing one line.**
 
@@ -111,11 +111,10 @@ as a working reference — same interface, trivial logic.
 your responder exists. Swap one line:
 
 ```python
-# from xiao_hei_vln.dummy import DummyResponder
 from xiao_hei_vln.your_model import MyVLMResponder
 
 ...
-responder = MyVLMResponder()   # was DummyResponder()
+responder = MyVLMResponder()
 ```
 
 `LatestCache`, the ROS subscribers, the publisher, the 2 Hz timer,
@@ -402,7 +401,6 @@ src/xiao_hei_vln/
 ├── messages/       pydantic models for every input/output type
 ├── sync/           LatestCache + tick snapshot
 ├── adapters/       ROS 2 subscribers + publishers (lazy rclpy import)
-├── dummy/          reference responder ported from dummyVLM.cpp
 ├── qwen/           Qwen2.5-VL responder (vLLM-backed, separate container)
 ├── gemini/         Gemini engine + offline batch evaluator + call tracer
 ├── scene_gemini/   submission responder: exploration + perception graph + Gemini
@@ -414,7 +412,7 @@ src/xiao_hei_vln/
 ├── eval_pipeline/  CLI entry point (xiao-hei-eval)
 ├── trajectory/     waypoint helpers
 ├── logger.py       VLMLogger — per-tick log writer + predictions.jsonl
-└── app/            rclpy entry point (xiao-hei-dummy-vlm console script)
+└── app/            rclpy entry point (xiao-hei-vlm console script)
 dataset_generator/  GT generation scripts + VLA-3D scene loaders
 dataset/            generated JSONL files (challenge_gt, vla3d_ref, vla3d_num)
 docker/             Dockerfile + compose + README

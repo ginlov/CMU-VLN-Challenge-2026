@@ -1,7 +1,7 @@
 # Team Xiao Hei — AI module image for the CMU VLN Challenge 2026.
 #
 # One container runs the whole submission pipeline (started by
-# `ros2 launch dummy_vlm dummy_vlm.launch`):
+# `ros2 launch vlm vlm.launch`):
 #
 #   question-directed nav  →  perception scene graph (YOLO-World + SAM)  →  Claude answer
 #
@@ -93,12 +93,14 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-insta
         -e ".[perception,exploration]"
 
 # ===========================================================================
-# dummy_vlm launcher package (name kept for the eval's `ros2 launch` command)
+# The launcher packages: `vlm` is the module, `dummy_vlm` is a launch-only
+# shim that forwards to it so the eval's documented command still works.
 # ===========================================================================
+COPY src/vlm /home/docker/ai_module/src/vlm
 COPY src/dummy_vlm /home/docker/ai_module/src/dummy_vlm
 WORKDIR /home/docker/ai_module
 RUN source /opt/ros/jazzy/setup.bash \
- && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select dummy_vlm
+ && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release --packages-select vlm dummy_vlm
 RUN echo "source /home/docker/ai_module/install/setup.bash" >> /home/docker/.bashrc
 
 # ===========================================================================
