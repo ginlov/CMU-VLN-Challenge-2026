@@ -171,10 +171,17 @@ def hand_over(node, question: str, kind: str) -> None:
       moment it starts, so it must never run at the same time as our drive
       loop; replacing this process guarantees only one of the two is ever
       alive. Everything after this call is unreachable.
-    - **The question is re-delivered.** We consumed a message they now need,
-      but the evaluation node "publishes a single question each startup ... at
-      a rate of 1Hz" (README §Evaluation), so their subscriber receives it
-      within a second of coming up. Nothing has to be forwarded.
+    - **The question is forwarded, not re-caught.** We already received it and
+      hold the text, so we pass it across the exec in `XIAO_HEI_QUESTION` — the
+      environment survives `execvp`. The pipeline primes its (sticky) cache
+      from that variable at startup and never has to re-catch the message off
+      `/challenge_question` after its ~12 s sidecar bringup. So object
+      reference now needs the question published only once, while *this*
+      process is up, exactly like the numerical and instruction paths: it is no
+      longer the odd type out that a single `--once` publish would strand. The
+      pipeline still subscribes to the topic, so the evaluation node's 1 Hz
+      re-publish (README §Evaluation) remains a harmless belt-and-braces rather
+      than a requirement.
 
     The cost is the few seconds we spent waiting for the question and
     classifying it, out of 600.
@@ -183,6 +190,10 @@ def hand_over(node, question: str, kind: str) -> None:
     node.get_logger().info(
         f"{kind} question — handing over to {' '.join(argv)} "
         f"({time.time() - T0:.0f}s into the budget): {question!r}")
+    # Forward the question we already hold so the pipeline does not depend on
+    # re-catching it off the topic — see the docstring. Set before the exec;
+    # os.environ carries into the replacement image.
+    os.environ["XIAO_HEI_QUESTION"] = question
     # Drop our subscriptions and publisher before the image is replaced, so the
     # graph does not briefly show two waypoint publishers during the swap.
     try:

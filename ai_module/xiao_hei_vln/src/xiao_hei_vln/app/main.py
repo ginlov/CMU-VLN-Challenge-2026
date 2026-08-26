@@ -451,6 +451,30 @@ def main() -> None:
 
     cache = LatestCache()
     subs = bind_subscribers(node, cache)
+
+    # Seed the question the router forwarded across its `exec`. challenge_node
+    # hands object-reference questions to this process by replacing itself, and
+    # sets XIAO_HEI_QUESTION to the text it already received off
+    # /challenge_question. Priming the sticky cache here means the tick loop
+    # (explorer and responder both read `snapshot.question`) has it from the
+    # first tick, so the pipeline never has to re-catch the message off the
+    # topic after the ~12 s sidecar bringup. The subscriber above still runs: a
+    # live 1 Hz publisher just overwrites this with identical text. Classified
+    # the same way an on-topic message is — via ChallengeQuestion.from_text — so
+    # seeding is behaviourally identical to receiving it, only earlier. See
+    # challenge_node.hand_over.
+    _forwarded_q = os.environ.get("XIAO_HEI_QUESTION", "").strip()
+    if _forwarded_q:
+        from xiao_hei_vln.messages.question import ChallengeQuestion
+
+        _q_now = node.get_clock().now().to_msg()
+        cache.put_question(
+            ChallengeQuestion.from_text(
+                _forwarded_q, Stamp(sec=_q_now.sec, nanosec=_q_now.nanosec)
+            )
+        )
+        node.get_logger().info(f"Seeded forwarded question: {_forwarded_q!r}")
+
     publisher = VLMOutputPublisher(node)
 
     # /way_point_reached is the autonomy stack's signal that the

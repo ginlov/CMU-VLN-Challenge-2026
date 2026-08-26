@@ -91,13 +91,18 @@ timeout 30 ros2 topic pub --rate 1 /challenge_question std_msgs/msg/String \
 > **Repeat the question, but stop repeating it.** Both halves matter, and
 > `--once` and an unbounded `--rate 1` fail in opposite directions.
 >
-> *Repeat it,* because an object-reference question makes the router `exec`
-> into `scene_claude.launch`, replacing its own process. The pipeline that
-> comes up subscribes to `/challenge_question` itself, by which time a single
-> `--once` message has been consumed by a process that no longer exists. It
-> then holds forever with nothing to head for — perception keeps ticking, so
-> the node looks healthy while no waypoint is published and the robot never
-> moves.
+> *Repeat it,* because every subscriber here is volatile: a single `--once`
+> message published before the router has finished coming up is missed, and the
+> run waits forever for a question that already went by. Publishing at 1 Hz —
+> the rate the evaluation node itself uses — covers that startup window, and it
+> is the same window for all three question types. (Object reference used to
+> need repeating for a second, longer reason: the router `exec`s into
+> `scene_claude.launch`, and the fresh pipeline — which only finishes coming up
+> ~12 s later — had to re-catch the message off `/challenge_question` by then.
+> It no longer does. The router forwards the question it already received across
+> the exec in `XIAO_HEI_QUESTION`, and the pipeline primes its cache from that,
+> so a single message the router catches is now enough for object reference
+> too.)
 >
 > *Stop repeating it,* because answering clears the de-duplication key
 > (`app/main.py`, `state["last_question_text"] = None`), so the next copy of
